@@ -1,0 +1,113 @@
+{
+    "typeName": "AWSQS::Kubernetes::Helm",
+    "description": "A resource provider for managing helm.",
+    "sourceUrl": "https://github.com/aws-quickstart/quickstart-helm-resource-provider.git",
+    "definitions": {
+        "Arn": {
+            "type": "string",
+            "pattern": "^arn:aws(-(cn|gov))?:[a-z-]+:(([a-z]+-)+[0-9])?:([0-9]{12})?:[^.]+$"
+        }
+    },
+    "properties": {
+        "ClusterID": {
+            "description": "EKS cluster name",
+            "type": "string"
+        },
+        "KubeConfig": {
+                "description": "Secrets Manager ARN for kubeconfig file",
+                "$ref": "#/definitions/Arn"
+            },
+        "Repository": {
+            "description": "Repository url.",
+            "type": "string"
+        },
+        "Chart": {
+            "description": "Chart name.",
+            "type": "string"
+        },
+        "Namespace": {
+            "description": "Namespace to use with helm. Created if doesn't exist and default will be used if not provided.",
+            "type": "string"
+        },
+        "Name": {
+            "description": "Name for the helm release.",
+            "type": "string"
+        },
+        "Values": {
+            "description": " Custom Values can optionally be specified",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "Version": {
+            "description": "Version can be specified, if not latest will be used.",
+            "type": "string"
+        },
+        "ValueOverrideURL": {
+            "description": " Custom Value Yaml file can optionally be specified",
+            "type": "string",
+            "pattern": "^[sS]3://[0-9a-zA-Z]([-.\\w]*[0-9a-zA-Z])(:[0-9]*)*([?/#].*)?$"
+        },
+        "ID": {
+            "type": "string"
+        },
+        "Resources": {
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "Chart"
+    ],
+    "readOnlyProperties": [
+        "/properties/Name",
+        "/properties/Namespace",
+        "/properties/Chart",
+        "/properties/Version",
+        "/properties/Resources"
+    ], 
+    "primaryIdentifier": [
+        "/properties/ID"
+    ],
+    "createOnlyProperties": [
+        "/properties/Name"
+    ],
+    "handlers": {
+        "create": {
+            "permissions": [
+                "secretsmanager:GetSecretValue",
+                "kms:Decrypt",
+                "eks:DescribeCluster"
+            ]
+        },
+        "read": {
+            "permissions": [
+                "secretsmanager:GetSecretValue",
+                "kms:Decrypt",
+                "eks:DescribeCluster"
+            ]
+        },
+        "update": {
+            "permissions": [
+                "secretsmanager:GetSecretValue",
+                "kms:Decrypt",
+                "eks:DescribeCluster"
+            ]
+        },
+        "delete": {
+            "permissions": [
+                "secretsmanager:GetSecretValue",
+                "kms:Decrypt",
+                "eks:DescribeCluster"
+            ]
+        },
+        "list": {
+            "permissions": [
+                "secretsmanager:GetSecretValue",
+                "kms:Decrypt",
+                "eks:DescribeCluster"
+            ]
+        }
+    }
+}
