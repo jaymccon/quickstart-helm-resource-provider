@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aws-cloudformation/cloudformation-cli-go-plugin/cfn/handler"
 	"github.com/aws/aws-sdk-go/aws"
@@ -17,6 +18,7 @@ func init() {
 	os.Setenv(xdg.ConfigHomeEnvVar, helmConfigHomeEnvVar)
 	os.Setenv(xdg.DataHomeEnvVar, helmDataHomeEnvVar)
 	os.Setenv("KUBECONFIG", kubeConfigLocalPath)
+	os.Setenv("StartTime", time.Now().Format(time.RFC3339))
 }
 
 // Create handles the Create event from the Cloudformation service.
@@ -44,6 +46,10 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 				return handler.ProgressEvent{}, errors.New("Resources didn't stabilize")
 			}
 			if pending {
+				timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
+				if timeout {
+					return handler.ProgressEvent{}, errors.New("Resource creation timed out")
+				}
 				log.Printf("Release %s have pending resources", r.name)
 				return handler.ProgressEvent{
 					OperationStatus:      handler.InProgress,
@@ -62,6 +68,10 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 				ResourceModel:   currentModel,
 			}, nil
 		case "pending-install":
+			timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
+			if timeout {
+				return handler.ProgressEvent{}, errors.New("Resource creation timed out")
+			}
 			return handler.ProgressEvent{
 				OperationStatus:      handler.InProgress,
 				Message:              "Release in progress",
@@ -169,6 +179,10 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 				return handler.ProgressEvent{}, errors.New("Resources didn't stabilize")
 			}
 			if pending {
+				timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
+				if timeout {
+					return handler.ProgressEvent{}, errors.New("Resource creation timed out")
+				}
 				log.Printf("Release %s have pending resources", r.name)
 				return handler.ProgressEvent{
 					OperationStatus:      handler.InProgress,
@@ -187,6 +201,10 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 				ResourceModel:   currentModel,
 			}, nil
 		case "pending-upgrade":
+			timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
+			if timeout {
+				return handler.ProgressEvent{}, errors.New("Resource creation timed out")
+			}
 			return handler.ProgressEvent{
 				OperationStatus:      handler.InProgress,
 				Message:              "Release in progress",

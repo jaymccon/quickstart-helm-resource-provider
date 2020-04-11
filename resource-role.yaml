@@ -25,6 +25,7 @@ Resources:
                 Action:
                 - "eks:DescribeCluster"
                 - "kms:Decrypt"
+                - "s3:GetObject"
                 - "secretsmanager:GetSecretValue"
                 Resource: "*"
 Outputs:

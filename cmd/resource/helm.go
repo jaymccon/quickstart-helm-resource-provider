@@ -159,7 +159,7 @@ func (c *Client) helmInstall(config *Config, values map[string]interface{}) erro
 			return genericError("Helm Upgrade", err)
 		}
 	default:
-		err = downloadHTTP(*config.chartName, chartLocalPath)
+		err = c.downloadChart(*config.chartPath, chartLocalPath)
 		if err != nil {
 			return err
 		}
@@ -293,7 +293,7 @@ func (c *Client) helmUpgrade(name string, config *Config, values map[string]inte
 			return genericError("Helm Upgrade", err)
 		}
 	default:
-		err = downloadHTTP(*config.chartName, chartLocalPath)
+		err = c.downloadChart(*config.chartName, chartLocalPath)
 		if err != nil {
 			return err
 		}

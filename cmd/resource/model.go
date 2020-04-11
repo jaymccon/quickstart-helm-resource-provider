@@ -21,4 +21,5 @@ type Model struct {
 	ValueOverrideURL *string                `json:",omitempty"`
 	ID               *string                `json:",omitempty"`
 	Resources        map[string]interface{} `json:",omitempty"`
+	TimeOut          *int                   `json:",omitempty"`
 }

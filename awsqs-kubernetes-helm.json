@@ -18,7 +18,7 @@
                 "$ref": "#/definitions/Arn"
             },
         "Repository": {
-            "description": "Repository url.",
+            "description": "Repository url. Defaults to kubernetes-charts.storage.googleapis.com",
             "type": "string"
         },
         "Chart": {
@@ -54,6 +54,10 @@
         },
         "Resources": {
             "type": "object"
+        },
+        "TimeOut": {
+            "description": "Timeout for resource provider. Default 60 mins",
+            "type": "integer"
         }
     },
     "additionalProperties": false,
@@ -78,7 +82,8 @@
             "permissions": [
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
-                "eks:DescribeCluster"
+                "eks:DescribeCluster",
+                "s3:GetObject"
             ]
         },
         "read": {
@@ -92,7 +97,8 @@
             "permissions": [
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
-                "eks:DescribeCluster"
+                "eks:DescribeCluster",
+                "s3:GetObject"
             ]
         },
         "delete": {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 const (
 	valuesYamlFile = "/tmp/values.yaml"
+	defaultTimeOut = 60
 )
 
 // ID struct for CFN physical resource
@@ -61,6 +63,7 @@ type Inputs struct {
 // NewClient is for generate clients for helm and kube
 func NewClient(cluster *string, kubeconfig *string, namespace *string, ses *session.Session) (*Client, error) {
 	c := &Client{}
+	c.session = ses
 	var err error
 	if err := createKubeConfig(ses, cluster, kubeconfig); err != nil {
 		return nil, err
@@ -85,8 +88,10 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 	base := map[string]interface{}{}
 	currentMap := map[string]interface{}{}
 	// Parse chart
-	switch {
-	case m.Chart != nil:
+	switch m.Chart {
+	case nil:
+		return nil, errors.New("Chart is required")
+	default:
 		// Check if chart is remote url
 		u, err := url.Parse(*m.Chart)
 		if err != nil {
@@ -97,6 +102,16 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 			i.config.repoType = aws.String("Local")
 			i.config.chart = aws.String(chartLocalPath)
 			i.config.chartPath = m.Chart
+			var chart string
+			sa := strings.Split(u.Path, "/")
+			switch {
+			case len(sa) > 1:
+				chart = sa[len(sa)-1]
+			default:
+				chart = strings.TrimLeft(u.RequestURI(), "/")
+			}
+			re := regexp.MustCompile(`[A-Za-z]+`)
+			i.config.chartName = aws.String(re.FindAllString(chart, 1)[0])
 		default:
 			// Get repo name and chart
 			sa := strings.Split(*m.Chart, "/")
@@ -111,8 +126,6 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 			i.config.repoType = aws.String("Remote")
 			i.config.chart = aws.String(fmt.Sprintf("%s/%s", *i.config.repoName, *i.config.chartName))
 		}
-	default:
-		return nil, errors.New("Chart is required")
 	}
 	if m.Values != nil {
 		for _, str := range m.Values {
@@ -121,26 +134,26 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 			}
 		}
 	}
-	switch {
-	case m.Namespace != nil:
-		i.config.namespace = m.Namespace
-	default:
+	switch m.Namespace {
+	case nil:
 		i.config.namespace = aws.String("default")
+	default:
+		i.config.namespace = m.Namespace
 	}
 	if m.Version != nil {
 		i.config.version = m.Version
 	}
-	switch {
-	case m.Repository != nil:
-		i.config.repoURL = m.Repository
-	default:
+	switch m.Repository {
+	case nil:
 		i.config.repoURL = aws.String(stableRepoURL)
-	}
-	switch {
-	case m.Name != nil:
-		i.config.name = m.Name
 	default:
+		i.config.repoURL = m.Repository
+	}
+	switch m.Name {
+	case nil:
 		i.config.name = aws.String(*i.config.chartName + "-" + fmt.Sprintf("%d", time.Now().Unix()))
+	default:
+		i.config.name = m.Name
 	}
 	if m.ValueOverrideURL != nil {
 		u, err := url.Parse(*m.ValueOverrideURL)
@@ -233,6 +246,7 @@ func downloadHTTP(url string, filepath string) error {
 	if err != nil {
 		return genericError("Writing file", err)
 	}
+	log.Printf("Downloaded %s ", out.Name())
 	return nil
 }
 
@@ -270,4 +284,45 @@ func decodeID(id *string) (*ID, error) {
 		return nil, genericError("Json Unmarshal", err)
 	}
 	return i, nil
+}
+
+// downloadChart downloads the chart
+func (c *Client) downloadChart(ur string, f string) error {
+	u, err := url.Parse(ur)
+	if err != nil {
+		return genericError("Process url", err)
+	}
+	switch {
+	case strings.ToLower(u.Scheme) == "s3":
+		bucket := u.Host
+		key := strings.TrimLeft(u.Path, "/")
+		err := downloadS3(c.session, bucket, key, f)
+		if err != nil {
+			return err
+		}
+	default:
+		err = downloadHTTP(ur, f)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkTimeOut is see if elapsed time crossed the timeout.
+func checkTimeOut(startTime string, timeOut *int) bool {
+	t, _ := time.Parse(time.RFC3339, startTime)
+	var s time.Duration
+	switch timeOut {
+	case nil:
+		s = defaultTimeOut * 60 * time.Second
+	default:
+		s = time.Duration(*timeOut) * 60 * time.Second
+	}
+	ts := time.Since(t).Seconds()
+	log.Printf("Elapsed Time : %v sec, Timeout: %v sec", ts, s.Seconds())
+	if ts >= s.Seconds() {
+		return true
+	}
+	return false
 }
