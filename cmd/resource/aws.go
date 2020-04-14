@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"encoding/base64"
 	"log"
 	"os"
@@ -59,8 +60,13 @@ func generateKubeToken(session *session.Session, clusterID string) (*string, err
 // downloadS3 download file from S3 to specified path.
 func downloadS3(session *session.Session, bucket string, key string, filename string) error {
 	log.Printf("Getting file from S3...")
+	region, err := getBucketRegion(session, bucket)
+	if err != nil {
+		return err
+	}
+	sess := session.Copy(&aws.Config{Region: region})
 	// Create a downloader with the session and default options
-	downloader := s3manager.NewDownloader(session)
+	downloader := s3manager.NewDownloader(sess)
 
 	// Create a file to write the S3 Object contents to.
 	f, err := os.Create(filename)
@@ -107,4 +113,15 @@ func getSecretsManager(session *session.Session, arn *string) ([]byte, error) {
 		secretString = []byte(string(decodedBinarySecretBytes[:len]))
 	}
 	return secretString, nil
+}
+
+func getBucketRegion(session *session.Session, bucket string) (*string, error) {
+	log.Printf("Checking S3 bucket region...")
+	ctx := context.Background()
+	region, err := s3manager.GetBucketRegion(ctx, session, bucket, *session.Config.Region)
+	if err != nil {
+		return nil, AWSError(err)
+	}
+	log.Printf("Found S3 bucket region: %v", region)
+	return aws.String(region), nil
 }
