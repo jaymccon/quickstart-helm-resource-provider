@@ -2,6 +2,7 @@ package resource
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -14,261 +15,116 @@ import (
 const callbackDelay = 30
 
 func init() {
-	os.Setenv(xdg.CacheHomeEnvVar, helmCacheHomeEnvVar)
-	os.Setenv(xdg.ConfigHomeEnvVar, helmConfigHomeEnvVar)
-	os.Setenv(xdg.DataHomeEnvVar, helmDataHomeEnvVar)
-	os.Setenv("KUBECONFIG", kubeConfigLocalPath)
+	os.Setenv(xdg.CacheHomeEnvVar, HelmCacheHomeEnvVar)
+	os.Setenv(xdg.ConfigHomeEnvVar, HelmConfigHomeEnvVar)
+	os.Setenv(xdg.DataHomeEnvVar, HelmDataHomeEnvVar)
 	os.Setenv("StartTime", time.Now().Format(time.RFC3339))
 }
 
 // Create handles the Create event from the Cloudformation service.
 func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
-	if req.CallbackContext["stabilizing"] == "True" {
-		data, err := decodeID(currentModel.ID)
-		if err != nil {
-			return handler.ProgressEvent{}, err
+	defer LogPanic()
+	stage := getStage(req.CallbackContext)
+	switch stage {
+	case InitStage, LambdaStabilize:
+		log.Printf("Starting %s...", stage)
+		if currentModel.Name == nil {
+			currentModel.Name = getReleaseNameContext(req.CallbackContext)
 		}
-		client, err := NewClient(aws.String(data.ClusterID), aws.String(data.KubeConfig), aws.String(data.Namespace), req.Session)
-		s, err := client.helmStatus(*currentModel.Name)
-		if err != nil {
-			return handler.ProgressEvent{}, err
-		}
-		switch s.status {
-		case "deployed":
-			r := &releaseData{
-				name:      *currentModel.Name,
-				namespace: s.namespace,
-				chart:     s.chart,
-				manifest:  s.manifest,
-			}
-			pending, err := client.checkPendingResources(r)
-			if err != nil {
-				return handler.ProgressEvent{}, errors.New("Resources didn't stabilize")
-			}
-			if pending {
-				timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
-				if timeout {
-					return handler.ProgressEvent{}, errors.New("Resource creation timed out")
-				}
-				log.Printf("Release %s have pending resources", r.name)
-				return handler.ProgressEvent{
-					OperationStatus:      handler.InProgress,
-					Message:              "Release in progress",
-					CallbackDelaySeconds: callbackDelay,
-					CallbackContext: map[string]interface{}{
-						"stabilizing": string("True"),
-					},
-					ResourceModel: currentModel,
-				}, nil
-			}
-			log.Printf("Release %s have no pending resources. Sending success...", r.name)
-			return handler.ProgressEvent{
-				OperationStatus: handler.Success,
-				Message:         "Successfully installed release",
-				ResourceModel:   currentModel,
-			}, nil
-		case "pending-install":
-			timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
-			if timeout {
-				return handler.ProgressEvent{}, errors.New("Resource creation timed out")
-			}
-			return handler.ProgressEvent{
-				OperationStatus:      handler.InProgress,
-				Message:              "Release in progress",
-				CallbackDelaySeconds: callbackDelay,
-				CallbackContext: map[string]interface{}{
-					"stabilizing": string("True"),
-				},
-				ResourceModel: currentModel,
-			}, nil
-		default:
-			return handler.ProgressEvent{
-				OperationStatus: handler.Failed,
-				Message:         "Release failed",
-				ResourceModel:   currentModel,
-			}, nil
-
-		}
+		return initialize(req.Session, currentModel, InstallReleaseAction), nil
+	case ReleaseStabilize:
+		log.Printf("Starting %s...", stage)
+		return checkReleaseStatus(req.Session, currentModel, CompleteStage), nil
+	default:
+		log.Println("Failed to identify stage.")
+		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
 	}
-
-	client, err := NewClient(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, req.Session)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-
-	inputs, err := client.processInputs(currentModel)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	currentModel.Name = inputs.config.name
-	currentModel.ID, err = generateID(currentModel, *inputs.config.name, aws.StringValue(req.Session.Config.Region), *inputs.config.namespace)
-	err = client.helmInstall(inputs.config, inputs.valueOpts)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	response := handler.ProgressEvent{
-		OperationStatus:      handler.InProgress,
-		Message:              "Release in progress",
-		ResourceModel:        currentModel,
-		CallbackDelaySeconds: callbackDelay,
-		CallbackContext: map[string]interface{}{
-			"stabilizing": string("True"),
-		},
-	}
-	return response, nil
 }
 
 // Read handles the Read event from the Cloudformation service.
 func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
-	data, err := decodeID(currentModel.ID)
+	data, err := DecodeID(currentModel.ID)
 	if err != nil {
 		return handler.ProgressEvent{}, err
 	}
-
-	client, err := NewClient(aws.String(data.ClusterID), aws.String(data.KubeConfig), aws.String(data.Namespace), req.Session)
+	client, err := NewClients(aws.String(data.ClusterID), aws.String(data.KubeConfig), aws.String(data.Namespace), req.Session, currentModel.RoleArn, nil)
 	if err != nil {
-		return handler.ProgressEvent{}, err
+		return makeEvent(currentModel, NoStage, err), nil
 	}
-	s, err := client.helmStatus(data.Name)
+	s, err := client.HelmStatus(data.Name)
 	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	r := &releaseData{
-		name:      data.Name,
-		namespace: s.namespace,
-		chart:     s.chart,
-		manifest:  s.manifest,
-	}
-	res, err := client.getKubeResources(r)
-	if err != nil {
-		return handler.ProgressEvent{}, err
+		return makeEvent(currentModel, NoStage, err), nil
 	}
 	currentModel.Name = aws.String(data.Name)
 	currentModel.Namespace = aws.String(data.Namespace)
-	currentModel.Chart = aws.String(s.chartName)
-	currentModel.Version = aws.String(s.chartVersion)
-	currentModel.Resources = res
-	return handler.ProgressEvent{
-		OperationStatus: handler.Success,
-		Message:         "Read complete",
-		ResourceModel:   currentModel,
-	}, nil
+	currentModel.Chart = aws.String(s.ChartName)
+	currentModel.Version = aws.String(s.ChartVersion)
+	e := &Event{}
+	e.Model = currentModel
+	e.ReleaseData = &ReleaseData{
+		Name:      data.Name,
+		Namespace: s.Namespace,
+		Chart:     s.Chart,
+		Manifest:  s.Manifest,
+	}
+	l := newLambdaResource(client.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+
+	vpc := false
+	if currentModel.VPCConfiguration != nil {
+		vpc = true
+		e.Action = GetResourcesAction
+		e.Kubeconfig, err = getLocalKubeConfig()
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+		u, err := client.initializeLambda(l)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+		if !u {
+			return makeEvent(currentModel, NoStage, fmt.Errorf("vpc connector didn't stabilize in time")), nil
+		}
+	}
+
+	currentModel.Resources, err = client.kubeResourcesWrapper(&data.Name, e, l.functionName, vpc)
+	if err != nil {
+		return makeEvent(currentModel, NoStage, err), nil
+	}
+	return makeEvent(currentModel, CompleteStage, nil), nil
 }
 
 // Update handles the Update event from the Cloudformation service.
 func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
-	client, err := NewClient(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, req.Session)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	if req.CallbackContext["stabilizing"] == "True" {
-		s, err := client.helmStatus(*currentModel.Name)
-		if err != nil {
-			return handler.ProgressEvent{}, err
+	defer LogPanic()
+	stage := getStage(req.CallbackContext)
+	switch stage {
+	case InitStage, LambdaStabilize:
+		log.Printf("Starting %s...", stage)
+		if currentModel.Name == nil {
+			currentModel.Name = getReleaseNameContext(req.CallbackContext)
 		}
-		switch s.status {
-		case "deployed":
-			r := &releaseData{
-				name:      *currentModel.Name,
-				namespace: s.namespace,
-				chart:     s.chart,
-				manifest:  s.manifest,
-			}
-			pending, err := client.checkPendingResources(r)
-			if err != nil {
-				return handler.ProgressEvent{}, errors.New("Resources didn't stabilize")
-			}
-			if pending {
-				timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
-				if timeout {
-					return handler.ProgressEvent{}, errors.New("Resource creation timed out")
-				}
-				log.Printf("Release %s have pending resources", r.name)
-				return handler.ProgressEvent{
-					OperationStatus:      handler.InProgress,
-					Message:              "Release in progress",
-					CallbackDelaySeconds: callbackDelay,
-					CallbackContext: map[string]interface{}{
-						"stabilizing": string("True"),
-					},
-					ResourceModel: currentModel,
-				}, nil
-			}
-			log.Printf("Release %s have no pending resources. Sending success...", r.name)
-			return handler.ProgressEvent{
-				OperationStatus: handler.Success,
-				Message:         "Successfully installed release",
-				ResourceModel:   currentModel,
-			}, nil
-		case "pending-upgrade":
-			timeout := checkTimeOut(os.Getenv("StartTime"), currentModel.TimeOut)
-			if timeout {
-				return handler.ProgressEvent{}, errors.New("Resource creation timed out")
-			}
-			return handler.ProgressEvent{
-				OperationStatus:      handler.InProgress,
-				Message:              "Release in progress",
-				CallbackDelaySeconds: callbackDelay,
-				CallbackContext: map[string]interface{}{
-					"stabilizing": string("True"),
-				},
-				ResourceModel: currentModel,
-			}, nil
-		default:
-			return handler.ProgressEvent{
-				OperationStatus: handler.Failed,
-				Message:         "Release failed",
-				ResourceModel:   currentModel,
-			}, nil
-
-		}
+		return initialize(req.Session, currentModel, UpdateReleaseAction), nil
+	case ReleaseStabilize:
+		log.Printf("Starting %s...", stage)
+		return checkReleaseStatus(req.Session, currentModel, CompleteStage), nil
+	default:
+		log.Println("Failed to identify stage.")
+		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
 	}
-	inputs, err := client.processInputs(currentModel)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	data, err := decodeID(currentModel.ID)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	err = client.helmUpgrade(data.Name, inputs.config, inputs.valueOpts)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	currentModel.Name = aws.String(data.Name)
-	response := handler.ProgressEvent{
-		OperationStatus:      handler.InProgress,
-		Message:              "Release in progress",
-		ResourceModel:        currentModel,
-		CallbackDelaySeconds: callbackDelay,
-		CallbackContext: map[string]interface{}{
-			"stabilizing": string("True"),
-		},
-	}
-	return response, nil
 }
 
 // Delete handles the Delete event from the Cloudformation service.
 func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
-	client, err := NewClient(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, req.Session)
-	if err != nil {
-		return handler.ProgressEvent{}, err
+	defer LogPanic()
+	stage := getStage(req.CallbackContext)
+	switch stage {
+	case InitStage, LambdaStabilize, ReleaseDelete, ReleaseStabilize:
+		log.Printf("Starting %s...", stage)
+		return initialize(req.Session, currentModel, UninstallReleaseAction), nil
+	default:
+		log.Println("Failed to identify stage.")
+		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
 	}
-	data, err := decodeID(currentModel.ID)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	err = client.helmUninstall(data.Name)
-	if err != nil {
-		return handler.ProgressEvent{}, err
-	}
-	response := handler.ProgressEvent{
-		OperationStatus: handler.Success,
-		Message:         "Uninstall complete",
-		ResourceModel:   currentModel,
-	}
-
-	return response, nil
 }
 
 // List handles the List event from the Cloudformation service.

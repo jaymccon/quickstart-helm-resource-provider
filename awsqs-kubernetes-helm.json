@@ -16,7 +16,11 @@
         "KubeConfig": {
                 "description": "Secrets Manager ARN for kubeconfig file",
                 "$ref": "#/definitions/Arn"
-            },
+        },
+        "RoleArn": {
+            "description": "IAM to use with EKS cluster authentication, if not resource execution role will be used,",
+            "$ref": "#/definitions/Arn"
+        },
         "Repository": {
             "description": "Repository url. Defaults to kubernetes-charts.storage.googleapis.com",
             "type": "string"
@@ -58,6 +62,26 @@
         "TimeOut": {
             "description": "Timeout for resource provider. Default 60 mins",
             "type": "integer"
+        },
+        "VPCConfiguration": {
+            "type": "object",
+            "description": "For network connectivity to Cluster inside VPC",
+            "properties": {
+                "SecurityGroupIds": {
+                    "description": "Specify one or more security groups.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "SubnetIds": {
+                    "description": "Specify one or more subnets.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
         }
     },
     "additionalProperties": false,
@@ -75,7 +99,8 @@
         "/properties/ID"
     ],
     "createOnlyProperties": [
-        "/properties/Name"
+        "/properties/Name",
+        "/properties/Namespace"
     ],
     "handlers": {
         "create": {
@@ -83,14 +108,43 @@
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
                 "eks:DescribeCluster",
-                "s3:GetObject"
+                "s3:GetObject",
+                "sts:AssumeRole",
+                "iam:PassRole",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:GetRole",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "ec2:CreateNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:Describe*",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "lambda:*"
             ]
         },
         "read": {
             "permissions": [
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
-                "eks:DescribeCluster"
+                "eks:DescribeCluster",
+                "s3:GetObject",
+                "sts:AssumeRole",
+                "iam:PassRole",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:GetRole",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "ec2:CreateNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:Describe*",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "lambda:*"
             ]
         },
         "update": {
@@ -98,21 +152,43 @@
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
                 "eks:DescribeCluster",
-                "s3:GetObject"
+                "s3:GetObject",
+                "sts:AssumeRole",
+                "iam:PassRole",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:GetRole",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "ec2:CreateNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:Describe*",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "lambda:*"
             ]
         },
         "delete": {
             "permissions": [
                 "secretsmanager:GetSecretValue",
                 "kms:Decrypt",
-                "eks:DescribeCluster"
-            ]
-        },
-        "list": {
-            "permissions": [
-                "secretsmanager:GetSecretValue",
-                "kms:Decrypt",
-                "eks:DescribeCluster"
+                "eks:DescribeCluster",
+                "s3:GetObject",
+                "sts:AssumeRole",
+                "iam:PassRole",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:GetRole",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "ec2:CreateNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:Describe*",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "lambda:*"
             ]
         }
     }

@@ -8,7 +8,6 @@ import (
 	"log"
 	"reflect"
 
-	"github.com/aws/aws-sdk-go/aws/session"
 	"helm.sh/helm/v3/pkg/strvals"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -24,21 +23,21 @@ import (
 )
 
 const (
-	kubeConfigLocalPath = "/tmp/kubeConfig"
-	tempManifest        = "/tmp/manifest.yaml"
+	KubeConfigLocalPath = "/tmp/kubeConfig"
+	TempManifest        = "/tmp/manifest.yaml"
 	chunkSize           = 500
 )
 
-type releaseData struct {
-	name, chart, namespace, manifest string
+type ReleaseData struct {
+	Name, Chart, Namespace, Manifest string `json:",omitempty"`
 }
 
 // createKubeConfig create kubeconfig from ClusterID or Secret manager.
-func createKubeConfig(session *session.Session, cluster *string, kubeconfig *string) error {
+func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluster *string, kubeconfig *string, role *string, customKubeconfig []byte) error {
 	switch {
 	case cluster != nil:
 		defaultConfig := api.NewConfig()
-		c, err := getClusterDetails(session, *cluster)
+		c, err := getClusterDetails(esvc, *cluster)
 		if err != nil {
 			return genericError("Getting Cluster details", err)
 		}
@@ -46,7 +45,7 @@ func createKubeConfig(session *session.Session, cluster *string, kubeconfig *str
 			Server:                   c.endpoint,
 			CertificateAuthorityData: []byte(c.CAData),
 		}
-		token, err := generateKubeToken(session, *cluster)
+		token, err := generateKubeToken(ssvc, cluster)
 		if err != nil {
 			return err
 		}
@@ -58,20 +57,27 @@ func createKubeConfig(session *session.Session, cluster *string, kubeconfig *str
 			AuthInfo: "aws",
 		}
 		defaultConfig.CurrentContext = "aws"
-		log.Printf("Writing kubeconfig file to %s", kubeConfigLocalPath)
+		log.Printf("Writing kubeconfig file to %s", KubeConfigLocalPath)
 
-		err = kubeconfigutil.WriteToDisk(kubeConfigLocalPath, defaultConfig)
+		err = kubeconfigutil.WriteToDisk(KubeConfigLocalPath, defaultConfig)
 		if err != nil {
 			return genericError("Write file: ", err)
 		}
 		return nil
 	case kubeconfig != nil:
-		s, err := getSecretsManager(session, kubeconfig)
+		s, err := getSecretsManager(secsvc, kubeconfig)
 		if err != nil {
 			return err
 		}
-		log.Printf("Writing kubeconfig file to %s", kubeConfigLocalPath)
-		err = ioutil.WriteFile(kubeConfigLocalPath, s, 0600)
+		log.Printf("Writing kubeconfig file to %s", KubeConfigLocalPath)
+		err = ioutil.WriteFile(KubeConfigLocalPath, s, 0600)
+		if err != nil {
+			return genericError("Write file: ", err)
+		}
+		return nil
+	case customKubeconfig != nil:
+		log.Printf("Writing kubeconfig file to %s", KubeConfigLocalPath)
+		err := ioutil.WriteFile(KubeConfigLocalPath, customKubeconfig, 0600)
 		if err != nil {
 			return genericError("Write file: ", err)
 		}
@@ -82,8 +88,8 @@ func createKubeConfig(session *session.Session, cluster *string, kubeconfig *str
 }
 
 // kubeClient create kube client from kubeconfig file.
-func kubeClient() (*kubernetes.Clientset, *rest.Config, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigLocalPath)
+func kubeClient() (kubernetes.Interface, *rest.Config, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", KubeConfigLocalPath)
 	if err != nil {
 		return nil, nil, genericError("Process Kubeconfig", err)
 	}
@@ -97,21 +103,28 @@ func kubeClient() (*kubernetes.Clientset, *rest.Config, error) {
 }
 
 // createNamespace create NS if not exists
-func (c *Client) createNamespace(namespace string) error {
+func (c *Clients) createNamespace(namespace string) error {
 	nsSpec := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-	_, err := c.clientSet.CoreV1().Namespaces().Create(nsSpec)
-	if kerrors.IsAlreadyExists(err) {
-		log.Printf("Namespace : %s. Already exists. Continue to install...", namespace)
-	} else if err != nil {
-		return genericError("Create NS", err)
+	_, err := c.ClientSet.CoreV1().Namespaces().Create(nsSpec)
+	log.Println(err)
+	switch err {
+	case nil:
+		return nil
+	default:
+		switch kerrors.IsAlreadyExists(err) {
+		case true:
+			log.Printf("Namespace : %s. Already exists. Continue to install...", namespace)
+			return nil
+		default:
+			return genericError("Create NS", err)
+		}
 	}
-	return nil
 }
 
-// checkPendingResources checks pending resources in for the specific release.
-func (c *Client) checkPendingResources(r *releaseData) (bool, error) {
-	log.Printf("Checking pending resources in %s", r.name)
-	if r.manifest == "" {
+// CheckPendingResources checks pending resources in for the specific release.
+func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
+	log.Printf("Checking pending resources in %s", r.Name)
+	if r.Manifest == "" {
 		return true, errors.New("Manifest not provided in the request")
 	}
 	pending := false
@@ -184,10 +197,10 @@ func (c *Client) checkPendingResources(r *releaseData) (bool, error) {
 	return pending, nil
 }
 
-// getKubeResources get resources for the specific release.
-func (c *Client) getKubeResources(r *releaseData) (map[string]interface{}, error) {
-	log.Printf("Getting resources for %s", r.name)
-	if r.manifest == "" {
+// GetKubeResources get resources for the specific release.
+func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, error) {
+	log.Printf("Getting resources for %s", r.Name)
+	if r.Manifest == "" {
 		return nil, errors.New("Manifest not provided in the request")
 	}
 	resources := make(map[string]interface{})
@@ -309,21 +322,21 @@ func (c *Client) getKubeResources(r *releaseData) (map[string]interface{}, error
 	return resources, nil
 }
 
-func (c *Client) getManifestDetails(r *releaseData) ([]*resource.Info, error) {
-	log.Printf("Getting resources for %s's manifest", r.name)
+func (c *Clients) getManifestDetails(r *ReleaseData) ([]*resource.Info, error) {
+	log.Printf("Getting resources for %s's manifest", r.Name)
 
-	err := ioutil.WriteFile(tempManifest, []byte(r.manifest), 0600)
+	err := ioutil.WriteFile(TempManifest, []byte(r.Manifest), 0600)
 	if err != nil {
 		return nil, genericError("Write manifest file: ", err)
 	}
 
 	f := &resource.FilenameOptions{
-		Filenames: []string{tempManifest},
+		Filenames: []string{TempManifest},
 	}
-	o := resource.NewBuilder(c.settings.RESTClientGetter())
+	o := resource.NewBuilder(c.RestClientGetter)
 	res := o.
 		Unstructured().
-		NamespaceParam(r.namespace).DefaultNamespace().AllNamespaces(false).
+		NamespaceParam(r.Namespace).DefaultNamespace().AllNamespaces(false).
 		FilenameParam(false, f).
 		RequestChunksOf(chunkSize).
 		ContinueOnError().

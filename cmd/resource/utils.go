@@ -1,7 +1,9 @@
 package resource
 
 import (
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -20,9 +23,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/strvals"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/yaml"
 )
 
@@ -33,60 +37,108 @@ const (
 
 // ID struct for CFN physical resource
 type ID struct {
-	ClusterID  string
-	KubeConfig string
-	Region     string
-	Name       string
-	Namespace  string
+	ClusterID  string `json:",omitempty"`
+	KubeConfig string `json:",omitempty"`
+	Region     string `json:",omitempty"`
+	Name       string `json:",omitempty"`
+	Namespace  string `json:",omitempty"`
 }
 
 // Client for helm, kube, aws and helm settings
-type Client struct {
-	helmClient *action.Configuration
-	clientSet  *kubernetes.Clientset
-	session    *session.Session
-	settings   *cli.EnvSettings
-	restConfig *rest.Config
+type Clients struct {
+	HelmClient       *action.Configuration              `json:",omitempty"`
+	ClientSet        kubernetes.Interface               `json:",omitempty"`
+	AWSSession       *session.Session                   `json:",omitempty"`
+	Settings         *cli.EnvSettings                   `json:",omitempty"`
+	RestClientGetter genericclioptions.RESTClientGetter `json:",omitempty"`
 }
 
 // Config for processed inputs
 type Config struct {
-	chart, chartName, chartPath, name, namespace, repoName, repoType, repoURL, version *string
+	Name, Namespace *string `json:",omitempty"`
+}
+
+// Chart for chart data
+type Chart struct {
+	Chart, ChartName, ChartPath, ChartType, ChartRepo, ChartVersion, ChartRepoURL *string `json:",omitempty"`
 }
 
 //Inputs for Config and Values for helm
 type Inputs struct {
-	config    *Config
-	valueOpts map[string]interface{}
+	Config       *Config                `json:",omitempty"`
+	ChartDetails *Chart                 `json:",omitempty"`
+	ValueOpts    map[string]interface{} `json:",omitempty"`
 }
 
-// NewClient is for generate clients for helm and kube
-func NewClient(cluster *string, kubeconfig *string, namespace *string, ses *session.Session) (*Client, error) {
-	c := &Client{}
-	c.session = ses
+// NewClients is for generate clients for helm, kube and AWS
+func NewClients(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+	c := &Clients{
+		AWSSession: ses,
+	}
 	var err error
-	if err := createKubeConfig(ses, cluster, kubeconfig); err != nil {
+	if err := createKubeConfig(c.EKSClient(nil, nil), c.STSClient(nil, nil), c.SecretsManagerClient(nil, nil), cluster, kubeconfig, role, customKubeconfig); err != nil {
 		return nil, err
 	}
-	c.clientSet, c.restConfig, err = kubeClient()
+	if namespace == nil {
+		namespace = aws.String("default")
+	}
+	c.RestClientGetter = kube.GetConfig(KubeConfigLocalPath, "", *namespace)
+	c.HelmClient, err = helmClientInvoke(namespace)
 	if err != nil {
 		return nil, err
 	}
-	c.helmClient, err = helmClientInvoke(namespace)
+	c.ClientSet, err = c.HelmClient.KubernetesClientSet()
 	if err != nil {
 		return nil, err
 	}
-	c.settings = cli.New()
+	c.Settings = cli.New()
+
 	return c, nil
 }
 
 //Process the inputs to the requirements
-func (c *Client) processInputs(m *Model) (*Inputs, error) {
+func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
 	log.Printf("Processing inputs...")
-	i := new(Inputs)
-	i.config = new(Config)
 	base := map[string]interface{}{}
 	currentMap := map[string]interface{}{}
+	if m.Values != nil {
+		for _, str := range m.Values {
+			if err := strvals.ParseInto(str, base); err != nil {
+				return nil, genericError("Process values", err)
+			}
+		}
+	}
+
+	if m.ValueOverrideURL != nil {
+		u, err := url.Parse(*m.ValueOverrideURL)
+		if err != nil {
+			return nil, genericError("Process ValueOverrideURL ", err)
+		}
+		bucket := u.Host
+		key := strings.TrimLeft(u.Path, "/")
+		region, err := getBucketRegion(c.S3Client(nil, nil), bucket)
+		if err != nil {
+			return nil, err
+		}
+		err = downloadS3(c.S3Client(region, nil), bucket, key, valuesYamlFile)
+		if err != nil {
+			return nil, err
+		}
+		byteKey, err := ioutil.ReadFile(valuesYamlFile)
+		if err != nil {
+			return nil, genericError("Reading custom yaml", err)
+		}
+		if err := yaml.Unmarshal(byteKey, &currentMap); err != nil {
+			return nil, genericError("Parsing yaml", err)
+		}
+	}
+	log.Printf("Processing inputs completed!")
+	return mergeMaps(base, currentMap), nil
+}
+
+// getChartDetails parse chart
+func getChartDetails(m *Model) (*Chart, error) {
+	cd := &Chart{}
 	// Parse chart
 	switch m.Chart {
 	case nil:
@@ -99,9 +151,9 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 		}
 		switch {
 		case u.Host != "":
-			i.config.repoType = aws.String("Local")
-			i.config.chart = aws.String(chartLocalPath)
-			i.config.chartPath = m.Chart
+			cd.ChartType = aws.String("Local")
+			cd.Chart = aws.String(chartLocalPath)
+			cd.ChartPath = m.Chart
 			var chart string
 			sa := strings.Split(u.Path, "/")
 			switch {
@@ -111,77 +163,63 @@ func (c *Client) processInputs(m *Model) (*Inputs, error) {
 				chart = strings.TrimLeft(u.RequestURI(), "/")
 			}
 			re := regexp.MustCompile(`[A-Za-z]+`)
-			i.config.chartName = aws.String(re.FindAllString(chart, 1)[0])
+			cd.ChartName = aws.String(re.FindAllString(chart, 1)[0])
 		default:
 			// Get repo name and chart
 			sa := strings.Split(*m.Chart, "/")
 			switch {
 			case len(sa) > 1:
-				i.config.repoName = aws.String(sa[0])
-				i.config.chartName = aws.String(sa[1])
+				cd.ChartRepo = aws.String(sa[0])
+				cd.ChartName = aws.String(sa[1])
 			default:
-				i.config.repoName = aws.String("stable")
-				i.config.chartName = m.Chart
+				cd.ChartRepo = aws.String("stable")
+				cd.ChartName = m.Chart
 			}
-			i.config.repoType = aws.String("Remote")
-			i.config.chart = aws.String(fmt.Sprintf("%s/%s", *i.config.repoName, *i.config.chartName))
+			cd.ChartType = aws.String("Remote")
+			cd.Chart = aws.String(fmt.Sprintf("%s/%s", *cd.ChartRepo, *cd.ChartName))
 		}
-	}
-	if m.Values != nil {
-		for _, str := range m.Values {
-			if err := strvals.ParseInto(str, base); err != nil {
-				return nil, genericError("Process values", err)
-			}
-		}
-	}
-	switch m.Namespace {
-	case nil:
-		i.config.namespace = aws.String("default")
-	default:
-		i.config.namespace = m.Namespace
 	}
 	if m.Version != nil {
-		i.config.version = m.Version
+		cd.ChartVersion = m.Version
 	}
 	switch m.Repository {
 	case nil:
-		i.config.repoURL = aws.String(stableRepoURL)
+		cd.ChartRepoURL = aws.String(stableRepoURL)
 	default:
-		i.config.repoURL = m.Repository
+		cd.ChartRepoURL = m.Repository
 	}
-	switch m.Name {
+	return cd, nil
+}
+
+func getReleaseName(name *string, chartname *string) *string {
+	switch name {
 	case nil:
-		i.config.name = aws.String(*i.config.chartName + "-" + fmt.Sprintf("%d", time.Now().Unix()))
+		return aws.String(*chartname + "-" + fmt.Sprintf("%d", time.Now().Unix()))
 	default:
-		i.config.name = m.Name
+		return name
 	}
-	if m.ValueOverrideURL != nil {
-		u, err := url.Parse(*m.ValueOverrideURL)
-		if err != nil {
-			return nil, genericError("Process ValueOverrideURL ", err)
-		}
-		bucket := u.Host
-		key := strings.TrimLeft(u.Path, "/")
-		err = downloadS3(c.session, bucket, key, valuesYamlFile)
-		if err != nil {
-			return nil, err
-		}
-		byteKey, err := ioutil.ReadFile(valuesYamlFile)
-		if err != nil {
-			return nil, genericError("Reading custom yaml", err)
-		}
-		if err := yaml.Unmarshal(byteKey, &currentMap); err != nil {
-			return nil, genericError("Parsing yaml", err)
-		}
+}
+
+func getReleaseNameContext(context map[string]interface{}) *string {
+	if context == nil {
+		return nil
 	}
-	// Merge with the maps
-	i.valueOpts = mergeMaps(base, currentMap)
-	log.Printf("Processing inputs completed!")
-	return i, nil
+	return aws.String(fmt.Sprintf("%v", context["Name"]))
+}
+func getReleaseNameSpace(n *string) *string {
+	switch n {
+	case nil:
+		return aws.String("default")
+	default:
+		return n
+	}
 }
 
 //AWSError takes an AWS generated error and handles it
 func AWSError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if awsErr, ok := err.(awserr.Error); ok {
 		// Get error details
 		log.Printf("AWS Error: %s - %s %v\n", awsErr.Code(), awsErr.Message(), awsErr.OrigErr())
@@ -232,6 +270,11 @@ func downloadHTTP(url string, filepath string) error {
 	if err != nil {
 		return genericError("Downloading file", err)
 	}
+	log.Println(resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return genericError("Downloading file", fmt.Errorf("Got response %v", resp.StatusCode))
+	}
+
 	defer resp.Body.Close()
 
 	// Create the file
@@ -254,12 +297,17 @@ func downloadHTTP(url string, filepath string) error {
 func generateID(m *Model, name string, region string, namespace string) (*string, error) {
 	i := &ID{}
 	switch {
+	case m.ClusterID != nil && m.KubeConfig != nil:
+		return nil, fmt.Errorf("Both ClusterID or KubeConfig can not be specified")
 	case m.ClusterID != nil:
 		i.ClusterID = *m.ClusterID
 	case m.KubeConfig != nil:
 		i.KubeConfig = *m.KubeConfig
 	default:
-		return nil, errors.New("Either ClusterID or KubeConfig must be specified")
+		return nil, fmt.Errorf("Either ClusterID or KubeConfig must be specified")
+	}
+	if name == "" || namespace == "" || region == "" {
+		return nil, fmt.Errorf("Incorrect values for variable name, namespace, region")
 	}
 	i.Name = name
 	i.Namespace = namespace
@@ -272,8 +320,8 @@ func generateID(m *Model, name string, region string, namespace string) (*string
 	return aws.String(str), nil
 }
 
-//decodeID decodes the physical id provided by CFN
-func decodeID(id *string) (*ID, error) {
+//DecodeID decodes the physical id provided by CFN
+func DecodeID(id *string) (*ID, error) {
 	i := &ID{}
 	str, err := base64.RawURLEncoding.DecodeString(*id)
 	if err != nil {
@@ -287,7 +335,7 @@ func decodeID(id *string) (*ID, error) {
 }
 
 // downloadChart downloads the chart
-func (c *Client) downloadChart(ur string, f string) error {
+func (c *Clients) downloadChart(ur string, f string) error {
 	u, err := url.Parse(ur)
 	if err != nil {
 		return genericError("Process url", err)
@@ -296,7 +344,11 @@ func (c *Client) downloadChart(ur string, f string) error {
 	case strings.ToLower(u.Scheme) == "s3":
 		bucket := u.Host
 		key := strings.TrimLeft(u.Path, "/")
-		err := downloadS3(c.session, bucket, key, f)
+		region, err := getBucketRegion(c.S3Client(nil, nil), bucket)
+		if err != nil {
+			return err
+		}
+		err = downloadS3(c.S3Client(region, nil), bucket, key, f)
 		if err != nil {
 			return err
 		}
@@ -320,9 +372,43 @@ func checkTimeOut(startTime string, timeOut *int) bool {
 		s = time.Duration(*timeOut) * 60 * time.Second
 	}
 	ts := time.Since(t).Seconds()
-	log.Printf("Elapsed Time : %v sec, Timeout: %v sec", ts, s.Seconds())
+	log.Printf("Elapsed Time : %.0f sec, Timeout: %v sec", ts, s.Seconds())
 	if ts >= s.Seconds() {
 		return true
 	}
 	return false
+}
+
+func getStage(context map[string]interface{}) Stage {
+	if context == nil {
+		return InitStage
+	}
+	if context["Stage"] == nil {
+		return InitStage
+	}
+	if context["StartTime"] != nil {
+		os.Setenv("StartTime", context["StartTime"].(string))
+	}
+	return Stage(fmt.Sprintf("%v", context["Stage"]))
+}
+
+func getHash(data string) *string {
+	hasher := md5.New()
+	hasher.Write([]byte(data))
+	return aws.String(hex.EncodeToString(hasher.Sum(nil)))
+}
+
+func LogPanic() {
+	if r := recover(); r != nil {
+		log.Println(string(debug.Stack()))
+		panic(r)
+	}
+}
+
+func getLocalKubeConfig() ([]byte, error) {
+	data, err := ioutil.ReadFile(KubeConfigLocalPath)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }

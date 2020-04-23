@@ -20,40 +20,41 @@ import (
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/kube"
+	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	helmCacheHomeEnvVar  = "/tmp/cache"
-	helmConfigHomeEnvVar = "/tmp/config"
-	helmDataHomeEnvVar   = "/tmp/data"
+	HelmCacheHomeEnvVar  = "/tmp/cache"
+	HelmConfigHomeEnvVar = "/tmp/config"
+	HelmDataHomeEnvVar   = "/tmp/data"
 	stableRepoURL        = "https://kubernetes-charts.storage.googleapis.com"
 	chartLocalPath       = "/tmp/chart.tgz"
 )
 
-type helmStatusData struct {
-	status       string
-	namespace    string
-	chartName    string
-	chartVersion string
-	chart        string
-	manifest     string
+type HelmStatusData struct {
+	Status       release.Status `json:",omitempty"`
+	Namespace    string         `json:",omitempty"`
+	ChartName    string         `json:",omitempty"`
+	ChartVersion string         `json:",omitempty"`
+	Chart        string         `json:",omitempty"`
+	Manifest     string         `json:",omitempty"`
 }
-type helmListData struct {
-	releaseName  string
-	chartName    string
-	chartVersion string
-	chart        string
+type HelmListData struct {
+	ReleaseName  string `json:",omitempty"`
+	ChartName    string `json:",omitempty"`
+	ChartVersion string `json:",omitempty"`
+	Chart        string `json:",omitempty"`
 }
 
-// helmClientInvoke generates the namespaced helm client
+// HelmClientInvoke generates the namespaced helm client
 func helmClientInvoke(namespace *string) (*action.Configuration, error) {
 	if namespace == nil {
 		namespace = aws.String("default")
 	}
 	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(kube.GetConfig(kubeConfigLocalPath, "", *namespace), *namespace, os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
+	if err := actionConfig.Init(kube.GetConfig(KubeConfigLocalPath, "", *namespace), *namespace, os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
 		fmt.Sprintf(format, v)
 	}); err != nil {
 		return nil, genericError("Helm client", err)
@@ -138,34 +139,35 @@ func addHelmRepoUpdate(name string, url string, settings *cli.EnvSettings) error
 	return nil
 }
 
-// helmInstall invokes the helm uninstall client
-func (c *Client) helmInstall(config *Config, values map[string]interface{}) error {
-	log.Printf("Installing release %s", *config.name)
+// HelmInstall invokes the helm uninstall client
+func (c *Clients) HelmInstall(config *Config, values map[string]interface{}, chart *Chart) error {
+	log.Printf("Installing release %s", *config.Name)
 	var cp string
 	var err error
-	client := action.NewInstall(c.helmClient)
-	client.ReleaseName = *config.name
-	if config.version != nil {
-		client.Version = *config.version
-	}
-	switch *config.repoType {
+	client := action.NewInstall(c.HelmClient)
+	client.ReleaseName = *config.Name
+
+	switch *chart.ChartType {
 	case "Remote":
-		err = addHelmRepoUpdate(*config.repoName, *config.repoURL, c.settings)
+		if chart.ChartVersion != nil {
+			client.Version = *chart.ChartVersion
+		}
+		err = addHelmRepoUpdate(*chart.ChartRepo, *chart.ChartRepoURL, c.Settings)
 		if err != nil {
 			return genericError("Helm Upgrade", err)
 		}
-		cp, err = client.ChartPathOptions.LocateChart(*config.chart, c.settings)
+		cp, err = client.ChartPathOptions.LocateChart(*chart.Chart, c.Settings)
 		if err != nil {
 			return genericError("Helm Upgrade", err)
 		}
 	default:
-		err = c.downloadChart(*config.chartPath, chartLocalPath)
+		err = c.downloadChart(*chart.ChartPath, chartLocalPath)
 		if err != nil {
 			return err
 		}
-		cp = *config.chart
+		cp = *chart.Chart
 	}
-	p := getter.All(c.settings)
+	p := getter.All(c.Settings)
 	chartRequested, err := loader.Load(cp)
 	if err != nil {
 		return genericError("Helm install", err)
@@ -179,8 +181,8 @@ func (c *Client) helmInstall(config *Config, values map[string]interface{}) erro
 					Keyring:          client.ChartPathOptions.Keyring,
 					SkipUpdate:       false,
 					Getters:          p,
-					RepositoryConfig: c.settings.RepositoryConfig,
-					RepositoryCache:  c.settings.RepositoryCache,
+					RepositoryConfig: c.Settings.RepositoryConfig,
+					RepositoryCache:  c.Settings.RepositoryCache,
 				}
 				if err := man.Update(); err != nil {
 					return genericError("Helm install", err)
@@ -191,11 +193,11 @@ func (c *Client) helmInstall(config *Config, values map[string]interface{}) erro
 		}
 	}
 
-	c.createNamespace(*config.namespace)
+	err = c.createNamespace(*config.Namespace)
 	if err != nil {
 		return err
 	}
-	client.Namespace = *config.namespace
+	client.Namespace = *config.Namespace
 
 	rel, err := client.Run(chartRequested, values)
 	if err != nil {
@@ -205,10 +207,10 @@ func (c *Client) helmInstall(config *Config, values map[string]interface{}) erro
 	return nil
 }
 
-// helmUninstall invokes the helm uninstaller client
-func (c *Client) helmUninstall(name string) error {
+// HelmUninstall invokes the helm uninstaller client
+func (c *Clients) HelmUninstall(name string) error {
 	log.Printf("Uninstalling release %s", name)
-	client := action.NewUninstall(c.helmClient)
+	client := action.NewUninstall(c.HelmClient)
 	res, err := client.Run(name)
 	if err != nil {
 		return genericError("Helm Uninstall", err)
@@ -220,35 +222,35 @@ func (c *Client) helmUninstall(name string) error {
 	return nil
 }
 
-// helmStatus check the status for specified release
-func (c *Client) helmStatus(name string) (*helmStatusData, error) {
-	log.Printf("Checking release status %s", name)
-	h := &helmStatusData{}
-	client := action.NewStatus(c.helmClient)
+// HelmStatus check the Status for specified release
+func (c *Clients) HelmStatus(name string) (*HelmStatusData, error) {
+	log.Printf("Checking release Status %s", name)
+	h := &HelmStatusData{}
+	client := action.NewStatus(c.HelmClient)
 	res, err := client.Run(name)
 	if err != nil {
 		return nil, err
 	}
 	if res != nil {
-		h.namespace = res.Namespace
-		h.manifest = res.Manifest
+		h.Namespace = res.Namespace
+		h.Manifest = res.Manifest
 		if res.Info != nil {
-			h.status = res.Info.Status.String()
+			h.Status = res.Info.Status
 		}
 		if res.Chart != nil {
-			h.chartName = res.Chart.Metadata.Name
-			h.chartVersion = res.Chart.Metadata.Version
-			h.chart = res.Chart.Metadata.Name + "-" + res.Chart.Metadata.Version
+			h.ChartName = res.Chart.Metadata.Name
+			h.ChartVersion = res.Chart.Metadata.Version
+			h.Chart = res.Chart.Metadata.Name + "-" + res.Chart.Metadata.Version
 		}
 	}
-	log.Printf("Found release in %s status", h.status)
+	log.Printf("Found release in %s Status", h.Status)
 	return h, nil
 }
 
-// helmList list the release with specific chart and version in a namespace.
-func (c *Client) helmList(config *Config) (*helmListData, error) {
-	l := &helmListData{}
-	client := action.NewList(c.helmClient)
+// HelmList list the release with specific chart and version in a namespace.
+func (c *Clients) HelmList(config *Config, chart *Chart) (*HelmListData, error) {
+	l := &HelmListData{}
+	client := action.NewList(c.HelmClient)
 	client.All = true
 	client.AllNamespaces = true
 	client.SetStateMask()
@@ -257,47 +259,48 @@ func (c *Client) helmList(config *Config) (*helmListData, error) {
 		return nil, err
 	}
 	for _, r := range res {
-		if config.version != nil {
-			if r.Namespace == *config.namespace && r.Chart.Metadata.Name == *config.chartName && r.Chart.Metadata.Version == *config.version {
-				l.releaseName = r.Name
+		if chart.ChartVersion != nil {
+			if r.Namespace == *config.Namespace && r.Chart.Metadata.Name == *chart.ChartName && r.Chart.Metadata.Version == *chart.ChartVersion {
+				l.ReleaseName = r.Name
 			}
 		} else {
-			if r.Namespace == *config.namespace && r.Chart.Metadata.Name == *config.chartName {
-				l.releaseName = r.Name
+			if r.Namespace == *config.Namespace && r.Chart.Metadata.Name == *chart.ChartName {
+				l.ReleaseName = r.Name
 			}
-			l.chartName = r.Chart.Metadata.Name
-			l.chartVersion = r.Chart.Metadata.Version
-			l.chartVersion = r.Chart.Metadata.Name + "-" + r.Chart.Metadata.Version
+			l.ChartName = r.Chart.Metadata.Name
+			l.ChartVersion = r.Chart.Metadata.Version
+			l.ChartVersion = r.Chart.Metadata.Name + "-" + r.Chart.Metadata.Version
 		}
 	}
 	return l, nil
 }
 
-// helmUpgrade invokes the helm upgrade client
-func (c *Client) helmUpgrade(name string, config *Config, values map[string]interface{}) error {
+// HelmUpgrade invokes the helm upgrade client
+func (c *Clients) HelmUpgrade(name string, config *Config, values map[string]interface{}, chart *Chart) error {
 	log.Printf("Upgrading release %s", name)
-	client := action.NewUpgrade(c.helmClient)
+	client := action.NewUpgrade(c.HelmClient)
 	var cp string
 	var err error
-	if config.version != nil {
-		client.Version = *config.version
-	}
-	switch *config.repoType {
+
+	switch *chart.ChartType {
 	case "Remote":
-		err = addHelmRepoUpdate(*config.repoName, *config.repoURL, c.settings)
+		if chart.ChartVersion != nil {
+			client.Version = *chart.ChartVersion
+		}
+		err = addHelmRepoUpdate(*chart.ChartRepo, *chart.ChartRepoURL, c.Settings)
 		if err != nil {
 			return genericError("Helm Upgrade", err)
 		}
-		cp, err = client.ChartPathOptions.LocateChart(*config.chart, c.settings)
+		cp, err = client.ChartPathOptions.LocateChart(*chart.Chart, c.Settings)
 		if err != nil {
 			return genericError("Helm Upgrade", err)
 		}
 	default:
-		err = c.downloadChart(*config.chartName, chartLocalPath)
+		err = c.downloadChart(*chart.ChartPath, chartLocalPath)
 		if err != nil {
 			return err
 		}
-		cp = *config.chart
+		cp = *chart.Chart
 	}
 	// Check chart dependencies to make sure all are present in /charts
 	ch, err := loader.Load(cp)
