@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"encoding/base64"
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 	"log"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/eks"
 	"github.com/aws/aws-sdk-go/service/eks/eksiface"
 	"github.com/aws/aws-sdk-go/service/lambda"
@@ -34,6 +36,7 @@ type LambdaAPI lambdaiface.LambdaAPI
 type STSAPI stsiface.STSAPI
 type SecretsManagerAPI secretsmanageriface.SecretsManagerAPI
 type EKSAPI eksiface.EKSAPI
+type EC2API ec2iface.EC2API
 
 type AWSClients interface {
 	S3Client(region *string, role *string) S3API
@@ -62,6 +65,10 @@ func (c *Clients) SecretsManagerClient(region *string, role *string) SecretsMana
 }
 func (c *Clients) EKSClient(region *string, role *string) EKSAPI {
 	return eks.New(c.Session(region, role))
+}
+
+func (c *Clients) EC2Client(region *string, role *string) EC2API {
+	return ec2.New(c.Session(region, role))
 }
 
 func (c *Clients) Session(region *string, role *string) *session.Session {

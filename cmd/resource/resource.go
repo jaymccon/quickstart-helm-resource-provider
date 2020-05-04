@@ -3,6 +3,10 @@ package resource
 import (
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+	eks2 "github.com/aws/aws-sdk-go/service/eks"
 	"log"
 	"os"
 	"time"
@@ -24,6 +28,12 @@ func init() {
 // Create handles the Create event from the Cloudformation service.
 func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -41,8 +51,75 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 	}
 }
 
+func getVpcConfig(session *session.Session, model *Model) error {
+
+	if model.ClusterID == nil || model.VPCConfiguration != nil {
+		return nil
+	}
+	client, err := NewClients(model.ClusterID, model.KubeConfig, model.Namespace, session, model.RoleArn, nil)
+	if err != nil {
+		return err
+	}
+	eks := client.EKSClient(nil, nil)
+	resp, err := eks.DescribeCluster(&eks2.DescribeClusterInput{Name: model.ClusterID})
+	if err != nil {
+		return err
+	}
+	if *resp.Cluster.ResourcesVpcConfig.EndpointPublicAccess == true && resp.Cluster.ResourcesVpcConfig.PublicAccessCidrs[0] == aws.String("0.0.0.0/0") {
+		return nil
+	}
+	log.Println("Detected private cluster, adding VPC Configuration...")
+	subnets, err := filterNattedSubnets(client.EC2Client(nil, nil), resp.Cluster.ResourcesVpcConfig.SubnetIds)
+	if err != nil {
+		return err
+	}
+	model.VPCConfiguration = &VPCConfiguration{
+		SecurityGroupIds: aws.StringValueSlice(resp.Cluster.ResourcesVpcConfig.SecurityGroupIds),
+		SubnetIds:        aws.StringValueSlice(subnets),
+	}
+	return nil
+}
+
+func filterNattedSubnets(ec2client ec2iface.EC2API, subnets []*string) (filtered []*string, err error) {
+	resp, err := ec2client.DescribeSubnets(&ec2.DescribeSubnetsInput{
+		SubnetIds: subnets,
+	})
+	if err != nil {
+		return filtered, err
+	}
+	for _, subnet := range resp.Subnets {
+		resp, err := ec2client.DescribeRouteTables(&ec2.DescribeRouteTablesInput{
+			Filters: []*ec2.Filter{
+				{
+					Name:   aws.String("association.subnet-id"),
+					Values: []*string{subnet.SubnetId},
+				},
+				{
+					Name:   aws.String("vpc-id"),
+					Values: []*string{subnet.VpcId},
+				},
+			},
+		})
+		if err != nil {
+			return filtered, err
+		}
+		for _, route := range resp.RouteTables[0].Routes {
+			if route.NatGatewayId != nil {
+				filtered = append(filtered, subnet.SubnetId)
+			}
+		}
+	}
+	return filtered, err
+}
+
 // Read handles the Read event from the Cloudformation service.
 func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+	if currentModel.VPCConfiguration == nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	data, err := DecodeID(currentModel.ID)
 	if err != nil {
 		return handler.ProgressEvent{}, err
@@ -96,6 +173,12 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 // Update handles the Update event from the Cloudformation service.
 func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -116,6 +199,12 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 // Delete handles the Delete event from the Cloudformation service.
 func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize, ReleaseDelete, ReleaseStabilize:
