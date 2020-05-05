@@ -19,6 +19,7 @@ import (
 const callbackDelay = 30
 
 func init() {
+	os.Setenv("HELM_DRIVER", HelmDriver)
 	os.Setenv(xdg.CacheHomeEnvVar, HelmCacheHomeEnvVar)
 	os.Setenv(xdg.ConfigHomeEnvVar, HelmConfigHomeEnvVar)
 	os.Setenv(xdg.DataHomeEnvVar, HelmDataHomeEnvVar)
