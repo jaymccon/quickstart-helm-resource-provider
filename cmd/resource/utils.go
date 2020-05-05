@@ -24,7 +24,6 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/kube"
-	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -99,16 +98,21 @@ func NewClients(cluster *string, kubeconfig *string, namespace *string, ses *ses
 //Process the inputs to the requirements
 func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
 	log.Printf("Processing inputs...")
-	base := map[string]interface{}{}
+	values := map[string]interface{}{}
+	valueYaml := map[string]interface{}{}
 	currentMap := map[string]interface{}{}
-	if m.Values != nil {
-		for _, str := range m.Values {
-			if err := strvals.ParseInto(str, base); err != nil {
-				return nil, genericError("Process values", err)
-			}
+	if m.ValueYaml != nil {
+		err := yaml.Unmarshal([]byte(*m.ValueYaml), &valueYaml)
+		if err != nil {
+			return nil, err
 		}
 	}
-
+	if m.Values != nil {
+		for k, v := range m.Values {
+			values[k] = v
+		}
+	}
+	base := mergeMaps(valueYaml, values)
 	if m.ValueOverrideURL != nil {
 		u, err := url.Parse(*m.ValueOverrideURL)
 		if err != nil {

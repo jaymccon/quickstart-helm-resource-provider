@@ -39,10 +39,14 @@
         },
         "Values": {
             "description": " Custom Values can optionally be specified",
-            "type": "array",
-            "items": {
-                "type": "string"
+            "type": "object",
+            "patternProperties": {
+                "^.+$": {"type": "string"}
             }
+        },
+        "ValueYaml": {
+            "description": "string representation of a values.yaml file",
+            "type": "string"
         },
         "Version": {
             "description": "Version can be specified, if not latest will be used.",
