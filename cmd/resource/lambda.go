@@ -12,8 +12,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/lambda"
-	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 )
 
 const (
@@ -52,11 +52,13 @@ type lambdaResource struct {
 	vpcConfig      *VPCConfiguration
 	functionOutput *lambda.GetFunctionOutput
 	functionName   *string
+	functionFile   string
+	awssession     *session.Session
 }
 
 type LambdaResponse struct {
 	StatusData       *HelmStatusData        `json:",omitempty"`
-	ListData         *HelmListData          `json:",omitempty"`
+	ListData         []HelmListData         `json:",omitempty"`
 	Resources        map[string]interface{} `json:",omitempty"`
 	PendingResources bool                   `json:",omitempty"`
 }
@@ -71,9 +73,9 @@ const (
 	StateNotFound State = "NotFound"
 )
 
-func (c *Clients) createFunction(l *lambdaResource) error {
+func createFunction(svc LambdaAPI, l *lambdaResource) error {
 	log.Printf("Creating the VPC connector %s", FunctionNamePrefix+*l.nameSuffix)
-	zip, _, err := getZip()
+	zip, _, err := getZip(l.functionFile)
 	if err != nil {
 		return AWSError(err)
 	}
@@ -93,13 +95,13 @@ func (c *Clients) createFunction(l *lambdaResource) error {
 		},
 	}
 
-	_, err = c.LambdaClient(nil, nil).CreateFunction(input)
+	_, err = svc.CreateFunction(input)
 	return AWSError(err)
 }
 
-func (c *Clients) deleteFunction(functionName *string) error {
-
-	_, err := c.LambdaClient(nil, nil).DeleteFunction(&lambda.DeleteFunctionInput{
+func deleteFunction(svc LambdaAPI, functionName *string) error {
+	log.Printf("Deleting the VPC connector %s", aws.StringValue(functionName))
+	_, err := svc.DeleteFunction(&lambda.DeleteFunctionInput{
 		FunctionName: functionName,
 	})
 	if err != nil {
@@ -110,28 +112,28 @@ func (c *Clients) deleteFunction(functionName *string) error {
 	return AWSError(err)
 }
 
-func (c *Clients) getFunction(functionName *string) (*lambda.GetFunctionOutput, error) {
-
-	functionOutput, err := c.LambdaClient(nil, nil).GetFunction(&lambda.GetFunctionInput{FunctionName: functionName})
+func getFunction(svc LambdaAPI, functionName *string) (*lambda.GetFunctionOutput, error) {
+	functionOutput, err := svc.GetFunction(&lambda.GetFunctionInput{FunctionName: functionName})
 	if err != nil {
 		return nil, err
 	}
 	return functionOutput, nil
 }
 
-func (c *Clients) updateFunction(l *lambdaResource) error {
+func updateFunction(svc LambdaAPI, l *lambdaResource) error {
 	log.Printf("Checking for any updates required for VPC connector %s", *l.functionName)
-	zip, hash, err := getZip()
+	zip, hash, err := getZip(l.functionFile)
 	if err != nil {
 		return err
 	}
 
 	if hash != *l.functionOutput.Configuration.CodeSha256 {
+		log.Printf("Proceeding with code update for VPC connector %s", *l.functionName)
 		codeInput := &lambda.UpdateFunctionCodeInput{
 			FunctionName: l.functionName,
 			ZipFile:      zip,
 		}
-		_, err = c.LambdaClient(nil, nil).UpdateFunctionCode(codeInput)
+		_, err = svc.UpdateFunctionCode(codeInput)
 		if err != nil {
 			return AWSError(err)
 		}
@@ -148,13 +150,13 @@ func (c *Clients) updateFunction(l *lambdaResource) error {
 			SubnetIds:        aws.StringSlice(l.vpcConfig.SubnetIds),
 		},
 	}
-	_, err = c.LambdaClient(nil, nil).UpdateFunctionConfiguration(configInput)
+	_, err = svc.UpdateFunctionConfiguration(configInput)
 	return AWSError(err)
 }
 
-func (c *Clients) checklambdaState(functionName *string) (State, error) {
+func checklambdaState(svc LambdaAPI, functionName *string) (State, error) {
 	log.Printf("Checking the state of VPC connector %s", *functionName)
-	o, err := c.getFunction(functionName)
+	o, err := getFunction(svc, functionName)
 	if err != nil {
 		if functionNotExists(err) {
 			return StateNotFound, nil
@@ -166,9 +168,8 @@ func (c *Clients) checklambdaState(functionName *string) (State, error) {
 	return State(*o.Configuration.State), nil
 }
 
-func (c *Clients) invokeLambda(functionName *string, event *Event) (*LambdaResponse, error) {
+func invokeLambda(svc LambdaAPI, functionName *string, event *Event) (*LambdaResponse, error) {
 	log.Printf("Invoking VPC connector %s for action: %s", *functionName, event.Action)
-
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return nil, err
@@ -178,7 +179,7 @@ func (c *Clients) invokeLambda(functionName *string, event *Event) (*LambdaRespo
 		Payload:      eventJSON,
 	}
 
-	result, err := c.LambdaClient(nil, nil).Invoke(input)
+	result, err := svc.Invoke(input)
 	if err != nil {
 		return nil, AWSError(err)
 	}
@@ -195,7 +196,6 @@ func (c *Clients) invokeLambda(functionName *string, event *Event) (*LambdaRespo
 		}
 		return nil, errors.New(errMsg)
 	}
-
 	resp := &LambdaResponse{}
 	err = json.Unmarshal(result.Payload, resp)
 	if err != nil {
@@ -204,9 +204,9 @@ func (c *Clients) invokeLambda(functionName *string, event *Event) (*LambdaRespo
 	return resp, nil
 }
 
-func getZip() ([]byte, string, error) {
+func getZip(file string) ([]byte, string, error) {
 	hasher := sha256.New()
-	s, err := ioutil.ReadFile(ZipFile)
+	s, err := ioutil.ReadFile(file)
 	hasher.Write(s)
 	if err != nil {
 		return nil, "", err
@@ -221,7 +221,7 @@ func functionNotExists(err error) bool {
 	return false
 }
 
-func newLambdaResource(svc stsiface.STSAPI, cluster *string, kubeconfig *string, vpc *VPCConfiguration) *lambdaResource {
+func newLambdaResource(svc STSAPI, cluster *string, kubeconfig *string, vpc *VPCConfiguration) *lambdaResource {
 	var nameSuffix, functionName, role *string
 	var err error
 	if vpc != nil {
@@ -248,5 +248,6 @@ func newLambdaResource(svc stsiface.STSAPI, cluster *string, kubeconfig *string,
 		nameSuffix:   nameSuffix,
 		vpcConfig:    vpc,
 		functionName: functionName,
+		functionFile: ZipFile,
 	}
 }

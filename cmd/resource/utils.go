@@ -25,7 +25,7 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/strvals"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
@@ -43,14 +43,16 @@ type ID struct {
 	Name       string `json:",omitempty"`
 	Namespace  string `json:",omitempty"`
 }
+type ClientsInterface interface{}
 
 // Client for helm, kube, aws and helm settings
 type Clients struct {
-	HelmClient       *action.Configuration              `json:",omitempty"`
-	ClientSet        kubernetes.Interface               `json:",omitempty"`
-	AWSSession       *session.Session                   `json:",omitempty"`
-	Settings         *cli.EnvSettings                   `json:",omitempty"`
-	RestClientGetter genericclioptions.RESTClientGetter `json:",omitempty"`
+	AWSClients AWSClientsIface
+	HelmClient *action.Configuration `json:",omitempty"`
+	ClientSet  kubernetes.Interface  `json:",omitempty"`
+	//AWSSession      *session.Session      `json:",omitempty"`
+	Settings        *cli.EnvSettings `json:",omitempty"`
+	ResourceBuilder func() *resource.Builder
 }
 
 // Config for processed inputs
@@ -71,18 +73,19 @@ type Inputs struct {
 }
 
 // NewClients is for generate clients for helm, kube and AWS
-func NewClients(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-	c := &Clients{
-		AWSSession: ses,
+var NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+	c := &Clients{}
+	if ses == nil {
+		ses = session.New()
 	}
+	c.AWSClients = &AWSClients{AWSSession: ses}
 	var err error
-	if err := createKubeConfig(c.EKSClient(nil, nil), c.STSClient(nil, nil), c.SecretsManagerClient(nil, nil), cluster, kubeconfig, role, customKubeconfig); err != nil {
+	if err := createKubeConfig(c.AWSClients.EKSClient(nil, nil), c.AWSClients.STSClient(nil, nil), c.AWSClients.SecretsManagerClient(nil, nil), cluster, kubeconfig, role, customKubeconfig); err != nil {
 		return nil, err
 	}
 	if namespace == nil {
 		namespace = aws.String("default")
 	}
-	c.RestClientGetter = kube.GetConfig(KubeConfigLocalPath, "", *namespace)
 	c.HelmClient, err = helmClientInvoke(namespace)
 	if err != nil {
 		return nil, err
@@ -92,13 +95,21 @@ func NewClients(cluster *string, kubeconfig *string, namespace *string, ses *ses
 		return nil, err
 	}
 	c.Settings = cli.New()
-
+	restClientGetter := kube.GetConfig(KubeConfigLocalPath, "", *namespace)
+	c.ResourceBuilder = func() *resource.Builder {
+		return resource.NewBuilder(restClientGetter)
+	}
 	return c, nil
 }
 
-//Process the inputs to the requirements
+func newC() *Clients {
+	//c := &Clients{}
+
+	return &Clients{AWSClients: &AWSClients{}}
+}
+
+//Process the values in the input
 func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
-	log.Printf("Processing inputs...")
 	base := map[string]interface{}{}
 	currentMap := map[string]interface{}{}
 	if m.Values != nil {
@@ -116,11 +127,11 @@ func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
 		}
 		bucket := u.Host
 		key := strings.TrimLeft(u.Path, "/")
-		region, err := getBucketRegion(c.S3Client(nil, nil), bucket)
+		region, err := getBucketRegion(c.AWSClients.S3Client(nil, nil), bucket)
 		if err != nil {
 			return nil, err
 		}
-		err = downloadS3(c.S3Client(region, nil), bucket, key, valuesYamlFile)
+		err = downloadS3(c.AWSClients.S3Client(region, nil), bucket, key, valuesYamlFile)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +143,6 @@ func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
 			return nil, genericError("Parsing yaml", err)
 		}
 	}
-	log.Printf("Processing inputs completed!")
 	return mergeMaps(base, currentMap), nil
 }
 
@@ -194,7 +204,10 @@ func getChartDetails(m *Model) (*Chart, error) {
 func getReleaseName(name *string, chartname *string) *string {
 	switch name {
 	case nil:
-		return aws.String(*chartname + "-" + fmt.Sprintf("%d", time.Now().Unix()))
+		if chartname != nil {
+			return aws.String(*chartname + "-" + fmt.Sprintf("%d", time.Now().Unix()))
+		}
+		return nil
 	default:
 		return name
 	}
@@ -204,8 +217,12 @@ func getReleaseNameContext(context map[string]interface{}) *string {
 	if context == nil {
 		return nil
 	}
+	if context["Name"] == nil {
+		return nil
+	}
 	return aws.String(fmt.Sprintf("%v", context["Name"]))
 }
+
 func getReleaseNameSpace(n *string) *string {
 	switch n {
 	case nil:
@@ -344,11 +361,11 @@ func (c *Clients) downloadChart(ur string, f string) error {
 	case strings.ToLower(u.Scheme) == "s3":
 		bucket := u.Host
 		key := strings.TrimLeft(u.Path, "/")
-		region, err := getBucketRegion(c.S3Client(nil, nil), bucket)
+		region, err := getBucketRegion(c.AWSClients.S3Client(nil, nil), bucket)
 		if err != nil {
 			return err
 		}
-		err = downloadS3(c.S3Client(region, nil), bucket, key, f)
+		err = downloadS3(c.AWSClients.S3Client(region, nil), bucket, key, f)
 		if err != nil {
 			return err
 		}

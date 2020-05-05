@@ -36,7 +36,7 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
-	l := newLambdaResource(client.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 	e := &Event{}
 	e.Inputs = new(Inputs)
 	e.Inputs.Config = new(Config)
@@ -113,11 +113,11 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		case err != nil:
 			if re.MatchString(err.Error()) {
 				log.Printf("Release not found.. Proceeding with VPC connector cleanup..")
-				_ = client.lambdaDestroy(session, currentModel)
+				_ = client.lambdaDestroy(currentModel)
 				return makeEvent(currentModel, NoStage, err)
 			}
 		default:
-			_ = client.lambdaDestroy(session, currentModel)
+			_ = client.lambdaDestroy(currentModel)
 			return makeEvent(currentModel, CompleteStage, nil)
 		}
 	}
@@ -131,7 +131,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
-	l := newLambdaResource(client.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 	e := &Event{}
 	e.Model = currentModel
 	if currentModel.VPCConfiguration != nil {
@@ -180,9 +180,9 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 	}
 }
 
-func (c *Clients) lambdaDestroy(session *session.Session, currentModel *Model) handler.ProgressEvent {
+func (c *Clients) lambdaDestroy(currentModel *Model) handler.ProgressEvent {
 	l := newLambdaResource(nil, currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
-	err := c.deleteFunction(l.functionName)
+	err := deleteFunction(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
@@ -190,20 +190,20 @@ func (c *Clients) lambdaDestroy(session *session.Session, currentModel *Model) h
 }
 
 func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
-	state, err := c.checklambdaState(l.functionName)
+	state, err := checklambdaState(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 	if err != nil {
 		return false, err
 	}
 	switch state {
 	case StateNotFound:
 		log.Printf("VPC connector %s not found", *l.functionName)
-		err := c.createFunction(l)
+		err := createFunction(c.AWSClients.LambdaClient(nil, nil), l)
 		if err != nil {
 			return false, err
 		}
 		count := 0
 		for count < lambdaStableTryCount {
-			state, err = c.checklambdaState(l.functionName)
+			state, err = checklambdaState(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 			if err != nil {
 				return false, err
 			}
@@ -216,11 +216,11 @@ func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
 		return false, nil
 	case StateActive:
 		var err error
-		l.functionOutput, err = c.getFunction(l.functionName)
+		l.functionOutput, err = getFunction(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 		if err != nil {
 			return false, err
 		}
-		err = c.updateFunction(l)
+		err = updateFunction(c.AWSClients.LambdaClient(nil, nil), l)
 		if err != nil {
 			return false, err
 		}
@@ -228,7 +228,7 @@ func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
 	case StatePending:
 		count := 0
 		for count < lambdaStableTryCount {
-			state, err = c.checklambdaState(l.functionName)
+			state, err = checklambdaState(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 			if err != nil {
 				return false, err
 			}
@@ -247,7 +247,7 @@ func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
 func (c *Clients) helmStatusWrapper(name *string, e *Event, functionName *string, vpc bool) (*HelmStatusData, error) {
 	switch vpc {
 	case true:
-		r, err := c.invokeLambda(functionName, e)
+		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		if err != nil {
 			return nil, err
 		}
@@ -258,10 +258,10 @@ func (c *Clients) helmStatusWrapper(name *string, e *Event, functionName *string
 	}
 }
 
-func (c *Clients) helmListWrapper(name *string, e *Event, functionName *string, vpc bool) (*HelmListData, error) {
+func (c *Clients) helmListWrapper(name *string, e *Event, functionName *string, vpc bool) ([]HelmListData, error) {
 	switch vpc {
 	case true:
-		r, err := c.invokeLambda(functionName, e)
+		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		if err != nil {
 			return nil, err
 		}
@@ -274,7 +274,7 @@ func (c *Clients) helmListWrapper(name *string, e *Event, functionName *string, 
 func (c *Clients) helmInstallWrapper(e *Event, functionName *string, vpc bool) error {
 	switch vpc {
 	case true:
-		_, err := c.invokeLambda(functionName, e)
+		_, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		return err
 	default:
 		return c.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
@@ -284,7 +284,7 @@ func (c *Clients) helmInstallWrapper(e *Event, functionName *string, vpc bool) e
 func (c *Clients) helmUpgradeWrapper(name *string, e *Event, functionName *string, vpc bool) error {
 	switch vpc {
 	case true:
-		_, err := c.invokeLambda(functionName, e)
+		_, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		return err
 	default:
 		return c.HelmUpgrade(*name, e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
@@ -294,7 +294,7 @@ func (c *Clients) helmUpgradeWrapper(name *string, e *Event, functionName *strin
 func (c *Clients) helmDeleteWrapper(name *string, e *Event, functionName *string, vpc bool) error {
 	switch vpc {
 	case true:
-		_, err := c.invokeLambda(functionName, e)
+		_, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		return err
 	default:
 		return c.HelmUninstall(*name)
@@ -304,7 +304,7 @@ func (c *Clients) helmDeleteWrapper(name *string, e *Event, functionName *string
 func (c *Clients) kubePendingWrapper(name *string, e *Event, functionName *string, vpc bool) (bool, error) {
 	switch vpc {
 	case true:
-		r, err := c.invokeLambda(functionName, e)
+		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		if err != nil {
 			return true, err
 		}
@@ -317,7 +317,7 @@ func (c *Clients) kubePendingWrapper(name *string, e *Event, functionName *strin
 func (c *Clients) kubeResourcesWrapper(name *string, e *Event, functionName *string, vpc bool) (map[string]interface{}, error) {
 	switch vpc {
 	case true:
-		r, err := c.invokeLambda(functionName, e)
+		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		if err != nil {
 			return nil, err
 		}

@@ -18,7 +18,7 @@
                 "$ref": "#/definitions/Arn"
         },
         "RoleArn": {
-            "description": "IAM to use with EKS cluster authentication, if not resource execution role will be used,",
+            "description": "IAM to use with EKS cluster authentication, if not resource execution role will be used",
             "$ref": "#/definitions/Arn"
         },
         "Repository": {
@@ -26,15 +26,15 @@
             "type": "string"
         },
         "Chart": {
-            "description": "Chart name.",
+            "description": "Chart name",
             "type": "string"
         },
         "Namespace": {
-            "description": "Namespace to use with helm. Created if doesn't exist and default will be used if not provided.",
+            "description": "Namespace to use with helm. Created if doesn't exist and default will be used if not provided",
             "type": "string"
         },
         "Name": {
-            "description": "Name for the helm release.",
+            "description": "Name for the helm release",
             "type": "string"
         },
         "Values": {
@@ -45,7 +45,7 @@
             }
         },
         "Version": {
-            "description": "Version can be specified, if not latest will be used.",
+            "description": "Version can be specified, if not latest will be used",
             "type": "string"
         },
         "ValueOverrideURL": {
@@ -100,7 +100,8 @@
     ],
     "createOnlyProperties": [
         "/properties/Name",
-        "/properties/Namespace"
+        "/properties/Namespace",
+        "/properties/ClusterID"
     ],
     "handlers": {
         "create": {

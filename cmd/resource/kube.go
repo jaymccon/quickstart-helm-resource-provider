@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +16,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/resource"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
 )
@@ -35,6 +33,8 @@ type ReleaseData struct {
 // createKubeConfig create kubeconfig from ClusterID or Secret manager.
 func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluster *string, kubeconfig *string, role *string, customKubeconfig []byte) error {
 	switch {
+	case cluster != nil && kubeconfig != nil:
+		return errors.New("Both ClusterID or KubeConfig can not be specified")
 	case cluster != nil:
 		defaultConfig := api.NewConfig()
 		c, err := getClusterDetails(esvc, *cluster)
@@ -87,25 +87,10 @@ func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluste
 	}
 }
 
-// kubeClient create kube client from kubeconfig file.
-func kubeClient() (kubernetes.Interface, *rest.Config, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", KubeConfigLocalPath)
-	if err != nil {
-		return nil, nil, genericError("Process Kubeconfig", err)
-	}
-
-	// create the clientset
-	clientSet, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, nil, genericError("Creating Clientset", err)
-	}
-	return clientSet, config, nil
-}
-
 // createNamespace create NS if not exists
 func (c *Clients) createNamespace(namespace string) error {
 	nsSpec := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-	_, err := c.ClientSet.CoreV1().Namespaces().Create(nsSpec)
+	_, err := c.ClientSet.CoreV1().Namespaces().Create(context.Background(), nsSpec, metav1.CreateOptions{})
 	log.Println(err)
 	switch err {
 	case nil:
@@ -129,6 +114,7 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 	}
 	pending := false
 	infos, err := c.getManifestDetails(r)
+	fmt.Println(err)
 	if err != nil {
 		return true, err
 	}
@@ -220,7 +206,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 			if err := json.Unmarshal(data, &svc); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.ObjectMeta.Namespace=%s", svc.Name, svc.ObjectMeta.Namespace), resources); err != nil {
+			namespace := svc.ObjectMeta.Namespace
+			if svc.ObjectMeta.Namespace == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.ObjectMeta.Namespace=%s", svc.Name, namespace), resources); err != nil {
 				return nil, err
 			}
 			if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Spec.Type=%s", svc.Name, svc.Spec.Type), resources); err != nil {
@@ -252,7 +242,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 				return nil, err
 			}
 
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, d.ObjectMeta.Namespace), resources); err != nil {
+			namespace := d.ObjectMeta.Namespace
+			if d.ObjectMeta.Namespace == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
 				return nil, err
 			}
 			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.Replicas=%d", d.ObjectMeta.Name, d.Status.Replicas), resources); err != nil {
@@ -269,7 +263,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 			if err := json.Unmarshal(data, &d); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, d.ObjectMeta.Namespace), resources); err != nil {
+			namespace := d.ObjectMeta.Namespace
+			if d.ObjectMeta.Namespace == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
 				return nil, err
 			}
 			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.NumberReady=%d", d.ObjectMeta.Name, d.Status.NumberReady), resources); err != nil {
@@ -286,7 +284,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 			if err := json.Unmarshal(data, &d); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, d.ObjectMeta.Namespace), resources); err != nil {
+			namespace := d.ObjectMeta.Namespace
+			if d.ObjectMeta.Namespace == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
 				return nil, err
 			}
 			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.Status.Replicas=%d", d.ObjectMeta.Name, d.Status.Replicas), resources); err != nil {
@@ -303,6 +305,13 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 			if err := json.Unmarshal(data, &i); err != nil {
 				return nil, err
 			}
+			namespace := i.ObjectMeta.Namespace
+			if i.ObjectMeta.Namespace == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("Ingresses.%s.ObjectMeta.Namespace=%s", i.Name, namespace), resources); err != nil {
+				return nil, err
+			}
 			if reflect.ValueOf(i.Status.LoadBalancer.Ingress).Len() > 0 {
 				if err := strvals.ParseIntoString(fmt.Sprintf("Ingresses.%s.Status.LoadBalancer.Ingress.Hostname=%s", i.Name, i.Status.LoadBalancer.Ingress[0].Hostname), resources); err != nil {
 					return nil, err
@@ -314,7 +323,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 				return nil, err
 			}
 			metadata := dat["metadata"].(map[string]interface{})
-			if err := strvals.ParseIntoString(fmt.Sprintf("%s.%s.ObjectMeta.Namespace=%s", kind, metadata["name"], metadata["namespace"]), resources); err != nil {
+			namespace := metadata["namespace"]
+			if metadata["namespace"] == "" {
+				namespace = "default"
+			}
+			if err := strvals.ParseIntoString(fmt.Sprintf("%s.%s.ObjectMeta.Namespace=%s", kind, metadata["name"], namespace), resources); err != nil {
 				return nil, err
 			}
 		}
@@ -333,8 +346,8 @@ func (c *Clients) getManifestDetails(r *ReleaseData) ([]*resource.Info, error) {
 	f := &resource.FilenameOptions{
 		Filenames: []string{TempManifest},
 	}
-	o := resource.NewBuilder(c.RestClientGetter)
-	res := o.
+
+	res := c.ResourceBuilder().
 		Unstructured().
 		NamespaceParam(r.Namespace).DefaultNamespace().AllNamespaces(false).
 		FilenameParam(false, f).

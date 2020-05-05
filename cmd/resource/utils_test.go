@@ -1,19 +1,13 @@
 package resource
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"os"
-	"reflect"
-	"regexp"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-)
-
-const (
-	testFolder = "testdata"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestMergeMaps is to test MergeMaps
@@ -33,32 +27,163 @@ func TestMergeMaps(t *testing.T) {
 		"c": "c",
 	}
 	result := mergeMaps(m1, m2)
-	if reflect.DeepEqual(result, expectedMap) {
-		t.Logf("mergeMaps PASSED")
-	} else {
-		t.Errorf("mergeMaps FAILED expected: %v but got %v", expectedMap, result)
-	}
+	assert.EqualValues(t, expectedMap, result)
+}
 
+// TestGetChartDetails is to test getChartDetails
+func TestGetChartDetails(t *testing.T) {
+	tests := map[string]struct {
+		m             *Model
+		expectedChart *Chart
+		expectedError *string
+	}{
+		"test1": {
+			m: &Model{
+				Chart:      aws.String("stable/test"),
+				Repository: aws.String("test.com"),
+			},
+			expectedChart: &Chart{
+				Chart:        aws.String("stable/test"),
+				ChartRepo:    aws.String("stable"),
+				ChartName:    aws.String("test"),
+				ChartType:    aws.String("Remote"),
+				ChartRepoURL: aws.String("test.com"),
+			},
+			expectedError: nil,
+		},
+		"test2": {
+			m: &Model{
+				Repository: aws.String("test.com"),
+			},
+			expectedChart: &Chart{},
+			expectedError: aws.String("Chart is required"),
+		},
+		"test3": {
+			m: &Model{
+				Chart:   aws.String("test"),
+				Version: aws.String("1.0.0"),
+			},
+			expectedChart: &Chart{
+				Chart:        aws.String("stable/test"),
+				ChartRepo:    aws.String("stable"),
+				ChartName:    aws.String("test"),
+				ChartType:    aws.String("Remote"),
+				ChartRepoURL: aws.String("https://kubernetes-charts.storage.googleapis.com"),
+				ChartVersion: aws.String("1.0.0"),
+			},
+			expectedError: nil,
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := getChartDetails(d.m)
+			if err != nil {
+				assert.EqualError(t, err, aws.StringValue(d.expectedError))
+			} else {
+				assert.EqualValues(t, d.expectedChart, result)
+			}
+		})
+	}
+}
+
+// TestGetReleaseName is to test getReleaseName
+func TestGetReleaseName(t *testing.T) {
+	tests := map[string]struct {
+		name         *string
+		chartname    *string
+		expectedName *string
+	}{
+		"NameProvided": {
+			name:         aws.String("Test"),
+			chartname:    nil,
+			expectedName: aws.String("Test"),
+		},
+		"AllValues": {
+			name:         aws.String("Test"),
+			chartname:    aws.String("TestChart"),
+			expectedName: aws.String("Test"),
+		},
+		"OnlyChart": {
+			name:         nil,
+			chartname:    aws.String("TestChart"),
+			expectedName: aws.String("TestChart-" + fmt.Sprintf("%d", time.Now().Unix())),
+		},
+		"NoValues": {
+			name:         nil,
+			chartname:    nil,
+			expectedName: nil,
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := getReleaseName(d.name, d.chartname)
+			assert.EqualValues(t, aws.StringValue(d.expectedName), aws.StringValue(result))
+		})
+	}
+}
+
+// TestGetReleaseNameContextis to test getReleaseNameContext
+func TestGetReleaseNameContext(t *testing.T) {
+	tests := map[string]struct {
+		context      map[string]interface{}
+		expectedName *string
+	}{
+		"NameProvided": {
+			context:      map[string]interface{}{"Name": "Test"},
+			expectedName: aws.String("Test"),
+		},
+		"Nil": {
+			context:      map[string]interface{}{},
+			expectedName: nil,
+		},
+		"NoValues": {
+			context:      map[string]interface{}{"StartTime": "Testtime"},
+			expectedName: nil,
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := getReleaseNameContext(d.context)
+			assert.EqualValues(t, aws.StringValue(d.expectedName), aws.StringValue(result))
+		})
+	}
+}
+
+// TestGetReleaseNameSpace is to test getReleaseNameSpace
+func TestGetReleaseNameSpace(t *testing.T) {
+	tests := map[string]struct {
+		namespace         *string
+		expectedNamespace *string
+	}{
+		"NameProvided": {
+			namespace:         aws.String("default"),
+			expectedNamespace: aws.String("default"),
+		},
+		"NoValues": {
+			namespace:         nil,
+			expectedNamespace: aws.String("default"),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := getReleaseNameSpace(d.namespace)
+			assert.EqualValues(t, aws.StringValue(d.expectedNamespace), aws.StringValue(result))
+		})
+	}
 }
 
 // TestHTTPDownload is to test downloadHTTP
 func TestHTTPDownload(t *testing.T) {
-	files := []string{"test.tar.gz", "nonExt"}
+	files := []string{"test.tgz", "nonExt"}
 	//expectedRespStatus := 200
 	// generate a test server so we can capture and inspect the request
-	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(testFolder))))
-	defer func() { testServer.Close() }()
+	testServer := MakeTestServer(TestFolder)
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			//req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
 			err := downloadHTTP(testServer.URL+"/"+file, "/dev/null")
-			re := regexp.MustCompile(`Error: At Downloading file`)
 			if err != nil {
-				if re.MatchString(err.Error()) {
-					t.Logf("downloadHTTP PASSED")
-				} else {
-					t.Errorf("downloadHTTP FAILED expected: got error %s", err)
-				}
+				assert.Contains(t, err.Error(), "At Downloading file")
 			}
 		})
 	}
@@ -66,7 +191,7 @@ func TestHTTPDownload(t *testing.T) {
 
 // TestGenerateID is to test generateID
 func TestGenerateID(t *testing.T) {
-	eID := aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ")
+	eID := aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6ImRlZmF1bHQifQ")
 	tests := map[string]struct {
 		m                                      Model
 		name, region, namespace, expectedError string
@@ -79,7 +204,7 @@ func TestGenerateID(t *testing.T) {
 			},
 			name:          "Test",
 			region:        "eu-west-1",
-			namespace:     "Test",
+			namespace:     "default",
 			expectedID:    eID,
 			expectedError: "Both ClusterID or KubeConfig can not be specified",
 		},
@@ -90,7 +215,7 @@ func TestGenerateID(t *testing.T) {
 			},
 			name:          "Test",
 			region:        "eu-west-1",
-			namespace:     "Test",
+			namespace:     "default",
 			expectedID:    eID,
 			expectedError: "Either ClusterID or KubeConfig must be specified",
 		},
@@ -101,7 +226,7 @@ func TestGenerateID(t *testing.T) {
 			},
 			name:          "",
 			region:        "eu-west-1",
-			namespace:     "Test",
+			namespace:     "default",
 			expectedID:    eID,
 			expectedError: "Incorrect values for variable name, namespace, region",
 		},
@@ -123,7 +248,7 @@ func TestGenerateID(t *testing.T) {
 			},
 			name:          "Test",
 			region:        "eu-west-1",
-			namespace:     "Test",
+			namespace:     "default",
 			expectedID:    eID,
 			expectedError: "",
 		},
@@ -131,18 +256,10 @@ func TestGenerateID(t *testing.T) {
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			result, err := generateID(&d.m, d.name, d.region, d.namespace)
-			switch {
-			case err != nil:
-				if err.Error() == d.expectedError {
-					t.Logf("generateID PASSED")
-				} else {
-					t.Errorf("generateID FAILED expected error : \"%s\" but got \"%s\"", d.expectedError, err.Error())
-				}
-			case *result == *d.expectedID:
-				t.Logf("generateID PASSED")
-
-			default:
-				t.Errorf("generateID FAILED expected: %s but got %s", *d.expectedID, *result)
+			if err != nil {
+				assert.EqualError(t, err, d.expectedError)
+			} else {
+				assert.EqualValues(t, aws.StringValue(d.expectedID), aws.StringValue(result))
 			}
 		})
 	}
@@ -158,37 +275,29 @@ func TestDecodeID(t *testing.T) {
 		Namespace: "Test",
 	}
 	result, _ := DecodeID(sID)
-	if reflect.DeepEqual(result, eID) {
-		t.Logf("DecodeID PASSED")
-	} else {
-		t.Errorf("DecodeID FAILED expected: %v but got %v", eID, result)
-	}
+	assert.EqualValues(t, eID, result)
 }
 
 // TestCheckTimeOut to test checkTimeOut
 func TestCheckTimeOut(t *testing.T) {
 	timeOut := aws.Int(90)
 	tests := map[string]struct {
-		time     string
-		expected bool
+		time      string
+		assertion assert.BoolAssertionFunc
 	}{
 		"10M": {
-			time:     time.Now().Add(time.Minute * -10).Format(time.RFC3339),
-			expected: false,
+			time:      time.Now().Add(time.Minute * -10).Format(time.RFC3339),
+			assertion: assert.False,
 		},
 		"10H": {
-			time:     time.Now().Add(time.Hour * -10).Format(time.RFC3339),
-			expected: true,
+			time:      time.Now().Add(time.Hour * -10).Format(time.RFC3339),
+			assertion: assert.True,
 		},
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			result := checkTimeOut(d.time, timeOut)
-			if result == d.expected {
-				t.Logf("checkTimeOut PASSED")
-			} else {
-				t.Errorf("checkTimeOut FAILED expected: %v but got %v", d.expected, result)
-			}
+			d.assertion(t, result)
 		})
 	}
 }
@@ -231,12 +340,10 @@ func TestGetStage(t *testing.T) {
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
+			os.Setenv("StartTime", d.expectedTime)
 			result := getStage(d.context)
-			if result == d.expectedStage && os.Getenv("StartTime") == d.expectedTime {
-				t.Logf("getStage PASSED")
-			} else {
-				t.Errorf("getStage FAILED expected: %s,%s but got %s,%s", d.expectedStage, d.expectedTime, result, os.Getenv("StartTime"))
-			}
+			assert.EqualValues(t, d.expectedStage, result)
+			assert.EqualValues(t, d.expectedTime, os.Getenv("StartTime"))
 		})
 	}
 }
@@ -246,9 +353,5 @@ func TestHash(t *testing.T) {
 	str := "Test"
 	expectedHash := aws.String("0cbc6611f5540bd0809a388dc95a615b")
 	result := getHash(str)
-	if *expectedHash == *result {
-		t.Logf("getHash PASSED")
-	} else {
-		t.Errorf("getHash FAILED expected: %s but got %s", *expectedHash, *result)
-	}
+	assert.EqualValues(t, aws.StringValue(expectedHash), aws.StringValue(result))
 }

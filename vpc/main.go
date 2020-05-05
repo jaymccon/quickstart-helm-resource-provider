@@ -7,7 +7,6 @@ import (
 	"github.com/aws-quickstart/quickstart-helm-resource-provider/cmd/resource"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaResponse, error) {
@@ -17,8 +16,8 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 	if err != nil {
 		return nil, err
 	}
-	sess := session.New()
-	client, err := resource.NewClients(nil, nil, aws.String(data.Namespace), sess, nil, e.Kubeconfig)
+
+	client, err := resource.NewClients(nil, nil, aws.String(data.Namespace), nil, nil, e.Kubeconfig)
 
 	switch e.Action {
 	case resource.InstallReleaseAction:

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ type HelmListData struct {
 	ChartName    string `json:",omitempty"`
 	ChartVersion string `json:",omitempty"`
 	Chart        string `json:",omitempty"`
+	Namespace    string `json:",omitempty"`
 }
 
 // HelmClientInvoke generates the namespaced helm client
@@ -212,7 +214,12 @@ func (c *Clients) HelmUninstall(name string) error {
 	log.Printf("Uninstalling release %s", name)
 	client := action.NewUninstall(c.HelmClient)
 	res, err := client.Run(name)
+	re := regexp.MustCompile(`no release`)
 	if err != nil {
+		if re.MatchString(err.Error()) {
+			log.Printf("Release not found..")
+			return nil
+		}
 		return genericError("Helm Uninstall", err)
 	}
 	if res != nil && res.Info != "" {
@@ -248,8 +255,9 @@ func (c *Clients) HelmStatus(name string) (*HelmStatusData, error) {
 }
 
 // HelmList list the release with specific chart and version in a namespace.
-func (c *Clients) HelmList(config *Config, chart *Chart) (*HelmListData, error) {
-	l := &HelmListData{}
+func (c *Clients) HelmList(config *Config, chart *Chart) ([]HelmListData, error) {
+	a := []HelmListData{}
+	l := HelmListData{}
 	client := action.NewList(c.HelmClient)
 	client.All = true
 	client.AllNamespaces = true
@@ -262,17 +270,26 @@ func (c *Clients) HelmList(config *Config, chart *Chart) (*HelmListData, error) 
 		if chart.ChartVersion != nil {
 			if r.Namespace == *config.Namespace && r.Chart.Metadata.Name == *chart.ChartName && r.Chart.Metadata.Version == *chart.ChartVersion {
 				l.ReleaseName = r.Name
+				l.Namespace = r.Namespace
+				l.ChartName = r.Chart.Metadata.Name
+				l.ChartVersion = r.Chart.Metadata.Version
+				l.Chart = r.Chart.Metadata.Name + "-" + r.Chart.Metadata.Version
 			}
 		} else {
 			if r.Namespace == *config.Namespace && r.Chart.Metadata.Name == *chart.ChartName {
 				l.ReleaseName = r.Name
+				l.Namespace = r.Namespace
+				l.ChartName = r.Chart.Metadata.Name
+				l.ChartVersion = r.Chart.Metadata.Version
+				l.Chart = r.Chart.Metadata.Name + "-" + r.Chart.Metadata.Version
 			}
-			l.ChartName = r.Chart.Metadata.Name
-			l.ChartVersion = r.Chart.Metadata.Version
-			l.ChartVersion = r.Chart.Metadata.Name + "-" + r.Chart.Metadata.Version
+		}
+
+		if l.ReleaseName != "" {
+			a = append(a, l)
 		}
 	}
-	return l, nil
+	return a, nil
 }
 
 // HelmUpgrade invokes the helm upgrade client

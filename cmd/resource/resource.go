@@ -67,7 +67,7 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 		Chart:     s.Chart,
 		Manifest:  s.Manifest,
 	}
-	l := newLambdaResource(client.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 
 	vpc := false
 	if currentModel.VPCConfiguration != nil {

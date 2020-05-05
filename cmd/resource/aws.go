@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -35,43 +36,49 @@ type STSAPI stsiface.STSAPI
 type SecretsManagerAPI secretsmanageriface.SecretsManagerAPI
 type EKSAPI eksiface.EKSAPI
 
-type AWSClients interface {
+type AWSClients struct {
+	AWSSession *session.Session
+	AWSClientsIface
+}
+
+type AWSClientsIface interface {
 	S3Client(region *string, role *string) S3API
 	LambdaClient(region *string, role *string) LambdaAPI
 	STSClient(region *string, role *string) STSAPI
 	SecretsManagerClient(region *string, role *string) SecretsManagerAPI
 	EKSClient(region *string, role *string) EKSAPI
+	Session(region *string, role *string) *session.Session
 }
 
-var _ AWSClients = (*Clients)(nil)
+//var _ AWSClientsIface = (*Clients)(nil)
 
-func (c *Clients) S3Client(region *string, role *string) S3API {
+func (c *AWSClients) S3Client(region *string, role *string) S3API {
 	return s3.New(c.Session(region, role))
 }
 
-func (c *Clients) LambdaClient(region *string, role *string) LambdaAPI {
+func (c *AWSClients) LambdaClient(region *string, role *string) LambdaAPI {
 	return lambda.New(c.Session(region, role))
 }
 
-func (c *Clients) STSClient(region *string, role *string) STSAPI {
+func (c *AWSClients) STSClient(region *string, role *string) STSAPI {
 	return sts.New(c.Session(region, role))
 }
 
-func (c *Clients) SecretsManagerClient(region *string, role *string) SecretsManagerAPI {
+func (c *AWSClients) SecretsManagerClient(region *string, role *string) SecretsManagerAPI {
 	return secretsmanager.New(c.Session(region, role))
 }
-func (c *Clients) EKSClient(region *string, role *string) EKSAPI {
+func (c *AWSClients) EKSClient(region *string, role *string) EKSAPI {
 	return eks.New(c.Session(region, role))
 }
 
-func (c *Clients) Session(region *string, role *string) *session.Session {
+func (c *AWSClients) Session(region *string, role *string) *session.Session {
 	if region != nil {
 		return c.AWSSession.Copy(c.Config(region, role))
 	}
 	return c.AWSSession
 }
 
-func (c *Clients) Config(region *string, role *string) *aws.Config {
+func (c *AWSClients) Config(region *string, role *string) *aws.Config {
 	config := aws.NewConfig().WithMaxRetries(10)
 
 	if region != nil {
@@ -95,10 +102,15 @@ func getClusterDetails(svc eksiface.EKSAPI, clusterName string) (*clusterData, e
 	if err != nil {
 		return nil, AWSError(err)
 	}
-	c.endpoint = *result.Cluster.Endpoint
-	c.CAData, err = base64.StdEncoding.DecodeString(*result.Cluster.CertificateAuthority.Data)
-	if err != nil {
-		return nil, genericError("Decoding CA", err)
+	switch *result.Cluster.Status {
+	case eks.ClusterStatusActive:
+		c.endpoint = *result.Cluster.Endpoint
+		c.CAData, err = base64.StdEncoding.DecodeString(*result.Cluster.CertificateAuthority.Data)
+		if err != nil {
+			return nil, genericError("Decoding CA", err)
+		}
+	default:
+		return nil, fmt.Errorf("Cluster %s in unexpected state %s", clusterName, *result.Cluster.Status)
 	}
 	return c, nil
 }
