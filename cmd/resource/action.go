@@ -19,7 +19,7 @@ const (
 	InitStage        Stage = "Init"
 	LambdaInitStage  Stage = "LambdaInit"
 	ReleaseStabilize Stage = "ReleaseStabilize"
-	ReleaseDelete    Stage = "ReleaseDelete"
+	ReleaseDelete    Stage = "UninstallRelease"
 	LambdaStabilize  Stage = "LambdaStabilize"
 	CompleteStage    Stage = "Complete"
 	NoStage          Stage = "NoStage"

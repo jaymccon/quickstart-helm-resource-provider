@@ -17,7 +17,8 @@ type Model struct {
 	Chart            *string                `json:",omitempty"`
 	Namespace        *string                `json:",omitempty"`
 	Name             *string                `json:",omitempty"`
-	Values           []string               `json:",omitempty"`
+	Values           map[string]string      `json:",omitempty"`
+	ValueYaml        *string                `json:",omitempty"`
 	Version          *string                `json:",omitempty"`
 	ValueOverrideURL *string                `json:",omitempty"`
 	ID               *string                `json:",omitempty"`

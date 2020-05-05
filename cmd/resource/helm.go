@@ -30,6 +30,7 @@ const (
 	HelmCacheHomeEnvVar  = "/tmp/cache"
 	HelmConfigHomeEnvVar = "/tmp/config"
 	HelmDataHomeEnvVar   = "/tmp/data"
+	HelmDriver           = "secret"
 	stableRepoURL        = "https://kubernetes-charts.storage.googleapis.com"
 	chartLocalPath       = "/tmp/chart.tgz"
 )

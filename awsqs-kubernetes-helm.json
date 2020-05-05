@@ -38,18 +38,22 @@
             "type": "string"
         },
         "Values": {
-            "description": " Custom Values can optionally be specified",
-            "type": "array",
-            "items": {
-                "type": "string"
+            "description": "Custom Values can optionally be specified",
+            "type": "object",
+            "patternProperties": {
+                "^.+$": {"type": "string"}
             }
+        },
+        "ValueYaml": {
+            "description": "String representation of a values.yaml file",
+            "type": "string"
         },
         "Version": {
             "description": "Version can be specified, if not latest will be used",
             "type": "string"
         },
         "ValueOverrideURL": {
-            "description": " Custom Value Yaml file can optionally be specified",
+            "description": "Custom Value Yaml file can optionally be specified",
             "type": "string",
             "pattern": "^[sS]3://[0-9a-zA-Z]([-.\\w]*[0-9a-zA-Z])(:[0-9]*)*([?/#].*)?$"
         },

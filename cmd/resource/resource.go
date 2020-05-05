@@ -15,6 +15,7 @@ import (
 const callbackDelay = 30
 
 func init() {
+	os.Setenv("HELM_DRIVER", HelmDriver)
 	os.Setenv(xdg.CacheHomeEnvVar, HelmCacheHomeEnvVar)
 	os.Setenv(xdg.ConfigHomeEnvVar, HelmConfigHomeEnvVar)
 	os.Setenv(xdg.DataHomeEnvVar, HelmDataHomeEnvVar)
@@ -24,6 +25,12 @@ func init() {
 // Create handles the Create event from the Cloudformation service.
 func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -43,6 +50,12 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 
 // Read handles the Read event from the Cloudformation service.
 func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	data, err := DecodeID(currentModel.ID)
 	if err != nil {
 		return handler.ProgressEvent{}, err
@@ -96,6 +109,12 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 // Update handles the Update event from the Cloudformation service.
 func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -116,6 +135,12 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 // Delete handles the Delete event from the Cloudformation service.
 func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
+	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
+		err := getVpcConfig(req.Session, currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
+	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize, ReleaseDelete, ReleaseStabilize:

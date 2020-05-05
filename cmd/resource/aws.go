@@ -8,9 +8,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/eks"
 	"github.com/aws/aws-sdk-go/service/eks/eksiface"
 	"github.com/aws/aws-sdk-go/service/lambda"
@@ -26,8 +29,9 @@ import (
 )
 
 type clusterData struct {
-	endpoint string
-	CAData   []byte
+	endpoint           string
+	CAData             []byte
+	resourcesVpcConfig *eks.VpcConfigResponse
 }
 
 type S3API s3iface.S3API
@@ -35,6 +39,7 @@ type LambdaAPI lambdaiface.LambdaAPI
 type STSAPI stsiface.STSAPI
 type SecretsManagerAPI secretsmanageriface.SecretsManagerAPI
 type EKSAPI eksiface.EKSAPI
+type EC2API ec2iface.EC2API
 
 type AWSClients struct {
 	AWSSession *session.Session
@@ -47,6 +52,7 @@ type AWSClientsIface interface {
 	STSClient(region *string, role *string) STSAPI
 	SecretsManagerClient(region *string, role *string) SecretsManagerAPI
 	EKSClient(region *string, role *string) EKSAPI
+	EC2Client(region *string, role *string) EC2API
 	Session(region *string, role *string) *session.Session
 }
 
@@ -69,6 +75,10 @@ func (c *AWSClients) SecretsManagerClient(region *string, role *string) SecretsM
 }
 func (c *AWSClients) EKSClient(region *string, role *string) EKSAPI {
 	return eks.New(c.Session(region, role))
+}
+
+func (c *AWSClients) EC2Client(region *string, role *string) EC2API {
+	return ec2.New(c.Session(region, role))
 }
 
 func (c *AWSClients) Session(region *string, role *string) *session.Session {
@@ -109,6 +119,7 @@ func getClusterDetails(svc eksiface.EKSAPI, clusterName string) (*clusterData, e
 		if err != nil {
 			return nil, genericError("Decoding CA", err)
 		}
+		c.resourcesVpcConfig = result.Cluster.ResourcesVpcConfig
 	default:
 		return nil, fmt.Errorf("Cluster %s in unexpected state %s", clusterName, *result.Cluster.Status)
 	}
@@ -141,8 +152,6 @@ func downloadS3(svc S3API, bucket string, key string, filename string) error {
 	if err != nil {
 		return genericError("downloadS3", err)
 	}
-
-	// Write the contents of S3 Object to the file
 
 	// Write the contents of S3 Object to the file
 	numBytes, err := downloader.Download(f, &s3.GetObjectInput{
@@ -216,4 +225,65 @@ func toRoleArn(arn *string) *string {
 	arnParts[0] = strings.Replace(arnParts[0], ":sts:", ":iam:", 1)
 	arn = aws.String(arnParts[0] + "/" + arnParts[1])
 	return arn
+}
+
+func getVpcConfig(session *session.Session, model *Model) error {
+
+	if model.ClusterID == nil || model.VPCConfiguration != nil {
+		return nil
+	}
+	client, err := NewClients(model.ClusterID, model.KubeConfig, model.Namespace, session, model.RoleArn, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := getClusterDetails(client.AWSClients.EKSClient(nil, nil), *model.ClusterID)
+	if err != nil {
+		return err
+	}
+	if *resp.resourcesVpcConfig.EndpointPublicAccess == true && resp.resourcesVpcConfig.PublicAccessCidrs[0] == aws.String("0.0.0.0/0") {
+		return nil
+	}
+	log.Println("Detected private cluster, adding VPC Configuration...")
+	subnets, err := filterNattedSubnets(client.AWSClients.EC2Client(nil, nil), resp.resourcesVpcConfig.SubnetIds)
+	if err != nil {
+		return err
+	}
+	model.VPCConfiguration = &VPCConfiguration{
+		SecurityGroupIds: aws.StringValueSlice(resp.resourcesVpcConfig.SecurityGroupIds),
+		SubnetIds:        aws.StringValueSlice(subnets),
+	}
+
+	return nil
+}
+
+func filterNattedSubnets(ec2client ec2iface.EC2API, subnets []*string) (filtered []*string, err error) {
+	resp, err := ec2client.DescribeSubnets(&ec2.DescribeSubnetsInput{
+		SubnetIds: subnets,
+	})
+	if err != nil {
+		return filtered, err
+	}
+	for _, subnet := range resp.Subnets {
+		resp, err := ec2client.DescribeRouteTables(&ec2.DescribeRouteTablesInput{
+			Filters: []*ec2.Filter{
+				{
+					Name:   aws.String("association.subnet-id"),
+					Values: []*string{subnet.SubnetId},
+				},
+				{
+					Name:   aws.String("vpc-id"),
+					Values: []*string{subnet.VpcId},
+				},
+			},
+		})
+		if err != nil {
+			return filtered, err
+		}
+		for _, route := range resp.RouteTables[0].Routes {
+			if route.NatGatewayId != nil {
+				filtered = append(filtered, subnet.SubnetId)
+			}
+		}
+	}
+	return filtered, err
 }
