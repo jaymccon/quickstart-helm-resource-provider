@@ -33,7 +33,7 @@ Resources:
       Chart: stable/jenkins
       ClusterID: !Ref Cluster
       Values:
-        - master.serviceType=LoadBalancer
+        master.serviceType: LoadBalancer
 Outputs:
   Name:
     Value: !GetAtt TestResource.Name

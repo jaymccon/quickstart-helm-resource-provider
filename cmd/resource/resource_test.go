@@ -12,6 +12,7 @@ import (
 func TestCreate(t *testing.T) {
 	tests := map[string]struct {
 		model *Model
+		stage *string
 	}{
 		"WithVPC": {
 			model: &Model{
@@ -29,6 +30,68 @@ func TestCreate(t *testing.T) {
 				ClusterID: aws.String("eks"),
 				Chart:     aws.String("stable/coscale"),
 				Namespace: aws.String("default"),
+			},
+		},
+		"WithOutVPCReleaseStabilize": {
+			model: &Model{
+				ClusterID: aws.String("eks"),
+				Chart:     aws.String("stable/coscale"),
+				Namespace: aws.String("default"),
+				Name:      aws.String("one"),
+			},
+			stage: aws.String("ReleaseStabilize"),
+		},
+		"Unknown": {
+			model: &Model{
+				ClusterID: aws.String("eks"),
+				Chart:     aws.String("stable/coscale"),
+				Namespace: aws.String("default"),
+			},
+			stage: aws.String("Unknown"),
+		},
+	}
+	req := handler.Request{
+		LogicalResourceID: "TestHelm",
+		CallbackContext:   nil,
+		Session:           MockSession,
+	}
+
+	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+		return NewMockClient(t), nil
+	}
+
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			if d.stage != nil {
+				req.CallbackContext = map[string]interface{}{
+					"Stage": aws.StringValue(d.stage),
+				}
+			}
+			_, err := Create(req, &Model{}, d.model)
+			assert.Nil(t, err)
+		})
+	}
+}
+
+func TestRead(t *testing.T) {
+	tests := map[string]struct {
+		model *Model
+	}{
+		"WithVPC": {
+			model: &Model{
+				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoib25lIiwiTmFtZXNwYWNlIjoiZGVmYXVsdCJ9"),
+				ClusterID: aws.String("eks"),
+				VPCConfiguration: &VPCConfiguration{
+					SecurityGroupIds: []string{"sg-01"},
+					SubnetIds:        []string{"subnet-01"},
+				},
+			},
+		},
+		"WithOutVPC": {
+			model: &Model{
+				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoib25lIiwiTmFtZXNwYWNlIjoiZGVmYXVsdCJ9"),
+				Namespace: aws.String("default"),
+				ClusterID: aws.String("eks"),
 			},
 		},
 	}
@@ -44,40 +107,6 @@ func TestCreate(t *testing.T) {
 
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := Create(req, &Model{}, d.model)
-			assert.Nil(t, err)
-		})
-	}
-}
-
-func TestRead(t *testing.T) {
-	tests := map[string]struct {
-		model *Model
-	}{
-		"WithVPC": {
-			model: &Model{
-				ID: aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"),
-				VPCConfiguration: &VPCConfiguration{
-					SecurityGroupIds: []string{"sg-01"},
-					SubnetIds:        []string{"subnet-01"},
-				},
-			},
-		},
-		"WithOutVPC": {
-			model: &Model{
-				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"),
-				Namespace: aws.String("default"),
-			},
-		},
-	}
-	req := handler.Request{
-		LogicalResourceID: "TestHelm",
-		CallbackContext:   nil,
-		Session:           MockSession,
-	}
-
-	for name, d := range tests {
-		t.Run(name, func(t *testing.T) {
 			_, err := Read(req, &Model{}, d.model)
 			assert.Nil(t, err)
 		})
@@ -87,6 +116,7 @@ func TestRead(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	tests := map[string]struct {
 		model *Model
+		stage *string
 	}{
 		"WithVPC": {
 			model: &Model{
@@ -106,6 +136,21 @@ func TestUpdate(t *testing.T) {
 				Namespace: aws.String("default"),
 			},
 		},
+		"WithOutVPCReleaseStabilize": {
+			model: &Model{
+				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"),
+				Namespace: aws.String("default"),
+				Name:      aws.String("one"),
+			},
+			stage: aws.String("ReleaseStabilize"),
+		},
+		"Unknown": {
+			model: &Model{
+				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"),
+				Namespace: aws.String("default"),
+			},
+			stage: aws.String("Unknown"),
+		},
 	}
 	req := handler.Request{
 		LogicalResourceID: "TestHelm",
@@ -113,8 +158,17 @@ func TestUpdate(t *testing.T) {
 		Session:           MockSession,
 	}
 
+	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+		return NewMockClient(t), nil
+	}
+
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
+			if d.stage != nil {
+				req.CallbackContext = map[string]interface{}{
+					"Stage": aws.StringValue(d.stage),
+				}
+			}
 			_, err := Update(req, &Model{}, d.model)
 			assert.Nil(t, err)
 		})
@@ -124,6 +178,7 @@ func TestUpdate(t *testing.T) {
 func TestDelete(t *testing.T) {
 	tests := map[string]struct {
 		model *Model
+		stage *string
 	}{
 		"WithVPC": {
 			model: &Model{
@@ -143,6 +198,13 @@ func TestDelete(t *testing.T) {
 				Namespace: aws.String("default"),
 			},
 		},
+		"Unknown": {
+			model: &Model{
+				ID:        aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"),
+				Namespace: aws.String("default"),
+			},
+			stage: aws.String("Unknown"),
+		},
 	}
 	req := handler.Request{
 		LogicalResourceID: "TestHelm",
@@ -150,8 +212,17 @@ func TestDelete(t *testing.T) {
 		Session:           MockSession,
 	}
 
+	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+		return NewMockClient(t), nil
+	}
+
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
+			if d.stage != nil {
+				req.CallbackContext = map[string]interface{}{
+					"Stage": aws.StringValue(d.stage),
+				}
+			}
 			_, err := Delete(req, &Model{}, d.model)
 			assert.Nil(t, err)
 		})

@@ -114,7 +114,6 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 	}
 	pending := false
 	infos, err := c.getManifestDetails(r)
-	fmt.Println(err)
 	if err != nil {
 		return true, err
 	}
@@ -136,14 +135,6 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 				if reflect.ValueOf(svc.Status.LoadBalancer.Ingress).Len() <= 0 {
 					pending = true
 				}
-			}
-		case "ReplicaSet":
-			var r appsv1.ReplicaSet
-			if err := json.Unmarshal(data, &r); err != nil {
-				return true, err
-			}
-			if r.Status.ReadyReplicas < *r.Spec.Replicas {
-				pending = true
 			}
 		case "Deployment":
 			var d appsv1.Deployment

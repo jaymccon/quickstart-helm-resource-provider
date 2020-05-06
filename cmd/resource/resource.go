@@ -25,8 +25,9 @@ func init() {
 // Create handles the Create event from the Cloudformation service.
 func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
-		err := getVpcConfig(req.Session, currentModel)
+	var err error
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
@@ -50,8 +51,9 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 
 // Read handles the Read event from the Cloudformation service.
 func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
-	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
-		err := getVpcConfig(req.Session, currentModel)
+	var err error
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
@@ -83,7 +85,7 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 
 	vpc := false
-	if currentModel.VPCConfiguration != nil {
+	if !IsZero(currentModel.VPCConfiguration) {
 		vpc = true
 		e.Action = GetResourcesAction
 		e.Kubeconfig, err = getLocalKubeConfig()
@@ -109,8 +111,9 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 // Update handles the Update event from the Cloudformation service.
 func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
-		err := getVpcConfig(req.Session, currentModel)
+	var err error
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
@@ -135,15 +138,16 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 // Delete handles the Delete event from the Cloudformation service.
 func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	if currentModel.VPCConfiguration == nil && currentModel.ClusterID != nil {
-		err := getVpcConfig(req.Session, currentModel)
+	var err error
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
 	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
-	case InitStage, LambdaStabilize, ReleaseDelete, ReleaseStabilize:
+	case InitStage, LambdaStabilize, UninstallRelease, ReleaseStabilize:
 		log.Printf("Starting %s...", stage)
 		return initialize(req.Session, currentModel, UninstallReleaseAction), nil
 	default:

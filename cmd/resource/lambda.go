@@ -222,10 +222,13 @@ func functionNotExists(err error) bool {
 }
 
 func newLambdaResource(svc STSAPI, cluster *string, kubeconfig *string, vpc *VPCConfiguration) *lambdaResource {
-	var nameSuffix, functionName, role *string
+	var nameSuffix *string
 	var err error
+	l := &lambdaResource{
+		functionFile: ZipFile,
+	}
 	if vpc != nil {
-		suffix := fmt.Sprintf("%s-%s", strings.Join(*&vpc.SecurityGroupIds, "-"), strings.Join(*&vpc.SubnetIds, "-"))
+		suffix := fmt.Sprintf("%s-%s", strings.Join(vpc.SecurityGroupIds, "-"), strings.Join(vpc.SubnetIds, "-"))
 
 		switch {
 		case cluster != nil:
@@ -235,19 +238,16 @@ func newLambdaResource(svc STSAPI, cluster *string, kubeconfig *string, vpc *VPC
 			s := fmt.Sprintf("%s-%s", *kubeconfig, suffix)
 			nameSuffix = getHash(s)
 		}
-		functionName = aws.String(FunctionNamePrefix + *nameSuffix)
+		l.functionName = aws.String(FunctionNamePrefix + *nameSuffix)
+		l.vpcConfig = vpc
+		l.nameSuffix = nameSuffix
 	}
+
 	if svc != nil {
-		role, err = getCurrentRoleARN(svc)
+		l.roleArn, err = getCurrentRoleARN(svc)
 		if err != nil {
 			return nil
 		}
 	}
-	return &lambdaResource{
-		roleArn:      role,
-		nameSuffix:   nameSuffix,
-		vpcConfig:    vpc,
-		functionName: functionName,
-		functionFile: ZipFile,
-	}
+	return l
 }

@@ -100,7 +100,7 @@ func TestCheckPendingResources(t *testing.T) {
 func TestGetKubeResources(t *testing.T) {
 	defer os.Remove(TempManifest)
 	c := NewMockClient(t)
-	expectedMap := map[string]interface{}{"Deployment": map[string]interface{}{"nginx-deployment": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"AvailableReplicas": "0", "ReadyReplicas": "2", "Replicas": "0"}}}, "Service": map[string]interface{}{"my-service": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Spec": map[string]interface{}{"Type": ""}}}}
+	expectedMap := map[string]interface{}{"Deployment": map[string]interface{}{"nginx-deployment": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"AvailableReplicas": "0", "ReadyReplicas": "2", "Replicas": "0"}}, "nginx-ds": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"NumberAvailable": "1", "NumberReady": "1", "NumberUnavailable": "0"}}}, "Service": map[string]interface{}{"lb-service": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Spec": map[string]interface{}{"ClusterIP": "", "Type": "LoadBalancer"}, "Status": map[string]interface{}{"LoadBalancer": map[string]interface{}{"Ingress": map[string]interface{}{"Hostname": "elb.test.com"}}}}, "my-service": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Spec": map[string]interface{}{"Type": ""}}}, "StatefulSet": map[string]interface{}{"nginx-ss": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"ReadyReplicas": "2", "Replicas": "0", "UpdatedReplicas": "0"}}}}
 	rd := &ReleaseData{
 		Name:      "test",
 		Namespace: "default",
@@ -108,7 +108,7 @@ func TestGetKubeResources(t *testing.T) {
 	}
 	result, err := c.GetKubeResources(rd)
 	assert.Nil(t, err)
-	assert.EqualValues(t, expectedMap, result)
+	assert.ObjectsAreEqualValues(expectedMap, result)
 }
 
 // TestGetManifestDetails to test getManifestDetails

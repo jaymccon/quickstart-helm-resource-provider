@@ -215,7 +215,7 @@ func (c *Clients) HelmUninstall(name string) error {
 	log.Printf("Uninstalling release %s", name)
 	client := action.NewUninstall(c.HelmClient)
 	res, err := client.Run(name)
-	re := regexp.MustCompile(`no release`)
+	re := regexp.MustCompile(`not found`)
 	if err != nil {
 		if re.MatchString(err.Error()) {
 			log.Printf("Release not found..")

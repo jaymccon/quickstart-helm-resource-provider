@@ -227,33 +227,33 @@ func toRoleArn(arn *string) *string {
 	return arn
 }
 
-func getVpcConfig(session *session.Session, model *Model) error {
+func getVpcConfig(session *session.Session, model *Model) (*VPCConfiguration, error) {
 
-	if model.ClusterID == nil || model.VPCConfiguration != nil {
-		return nil
+	if model.ClusterID == nil || !IsZero(model.VPCConfiguration) {
+		return nil, nil
 	}
 	client, err := NewClients(model.ClusterID, model.KubeConfig, model.Namespace, session, model.RoleArn, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := getClusterDetails(client.AWSClients.EKSClient(nil, nil), *model.ClusterID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if *resp.resourcesVpcConfig.EndpointPublicAccess == true && resp.resourcesVpcConfig.PublicAccessCidrs[0] == aws.String("0.0.0.0/0") {
-		return nil
+	if *resp.resourcesVpcConfig.EndpointPublicAccess == true && *resp.resourcesVpcConfig.PublicAccessCidrs[0] == "0.0.0.0/0" {
+		return nil, nil
 	}
 	log.Println("Detected private cluster, adding VPC Configuration...")
 	subnets, err := filterNattedSubnets(client.AWSClients.EC2Client(nil, nil), resp.resourcesVpcConfig.SubnetIds)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	model.VPCConfiguration = &VPCConfiguration{
+	log.Printf("Using Subnets: %v, SecurityGroups: %v", aws.StringValueSlice(subnets), aws.StringValueSlice(resp.resourcesVpcConfig.SecurityGroupIds))
+
+	return &VPCConfiguration{
 		SecurityGroupIds: aws.StringValueSlice(resp.resourcesVpcConfig.SecurityGroupIds),
 		SubnetIds:        aws.StringValueSlice(subnets),
-	}
-
-	return nil
+	}, nil
 }
 
 func filterNattedSubnets(ec2client ec2iface.EC2API, subnets []*string) (filtered []*string, err error) {

@@ -29,6 +29,7 @@ func TestHandler(t *testing.T) {
 				ChartType: aws.String("Local"),
 				ChartPath: aws.String(testServer.URL + "/test.tgz"),
 				Chart:     aws.String("/tmp/chart.tgz"),
+				ChartName: aws.String("hello"),
 			},
 		},
 		ReleaseData: &resource.ReleaseData{
@@ -76,6 +77,12 @@ func TestHandler(t *testing.T) {
 				ID: aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoib25lIiwiTmFtZXNwYWNlIjoiZGVmYXVsdCJ9"),
 			},
 			action: resource.UninstallReleaseAction,
+		},
+		"ListReleaseAction": {
+			m: &resource.Model{
+				ID: aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoib25lIiwiTmFtZXNwYWNlIjoiZGVmYXVsdCJ9"),
+			},
+			action: resource.ListReleaseAction,
 		},
 	}
 	resource.NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*resource.Clients, error) {

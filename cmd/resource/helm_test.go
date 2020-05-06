@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -46,7 +48,8 @@ func TestAddHelmRepoUpdate(t *testing.T) {
 // TestHelmInstall to test HelmInstall
 func TestHelmInstall(t *testing.T) {
 	defer os.Remove(chartLocalPath)
-	testServer := MakeTestServer(TestFolder)
+	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
+	defer func() { testServer.Close() }()
 	c := NewMockClient(t)
 	tests := map[string]struct {
 		m           *Model
@@ -191,7 +194,8 @@ func TestHelmList(t *testing.T) {
 // TestHelmUpgrade to test HelmUpgrade
 func TestHelmUpgrade(t *testing.T) {
 	defer os.Remove(chartLocalPath)
-	testServer := MakeTestServer(TestFolder)
+	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
+	defer func() { testServer.Close() }()
 	c := NewMockClient(t)
 	tests := map[string]struct {
 		m           *Model

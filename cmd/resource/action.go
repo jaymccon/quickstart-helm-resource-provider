@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"time"
 
 	"github.com/aws-cloudformation/cloudformation-cli-go-plugin/cfn/handler"
@@ -19,7 +18,7 @@ const (
 	InitStage        Stage = "Init"
 	LambdaInitStage  Stage = "LambdaInit"
 	ReleaseStabilize Stage = "ReleaseStabilize"
-	ReleaseDelete    Stage = "UninstallRelease"
+	UninstallRelease Stage = "UninstallRelease"
 	LambdaStabilize  Stage = "LambdaStabilize"
 	CompleteStage    Stage = "Complete"
 	NoStage          Stage = "NoStage"
@@ -48,7 +47,6 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 	}
 	e.Inputs.Config.Name = getReleaseName(currentModel.Name, e.Inputs.ChartDetails.ChartName)
 	currentModel.Name = e.Inputs.Config.Name
-	log.Printf("Release name: %s", aws.StringValue(e.Inputs.Config.Name))
 	e.Inputs.Config.Namespace = getReleaseNameSpace(currentModel.Namespace)
 	if currentModel.ID == nil {
 		currentModel.ID, err = generateID(currentModel, *e.Inputs.Config.Name, aws.StringValue(session.Config.Region), *e.Inputs.Config.Namespace)
@@ -56,7 +54,7 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 			return makeEvent(currentModel, NoStage, err)
 		}
 	}
-	if currentModel.VPCConfiguration != nil {
+	if !IsZero(currentModel.VPCConfiguration) {
 		vpc = true
 		e.Kubeconfig, err = getLocalKubeConfig()
 		if err != nil {
@@ -108,18 +106,10 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 			return makeEvent(currentModel, NoStage, err)
 		}
 		err = client.helmDeleteWrapper(aws.String(data.Name), e, l.functionName, vpc)
-		re := regexp.MustCompile(`release: not found`)
-		switch {
-		case err != nil:
-			if re.MatchString(err.Error()) {
-				log.Printf("Release not found.. Proceeding with VPC connector cleanup..")
-				_ = client.lambdaDestroy(currentModel)
-				return makeEvent(currentModel, NoStage, err)
-			}
-		default:
-			_ = client.lambdaDestroy(currentModel)
-			return makeEvent(currentModel, CompleteStage, nil)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err)
 		}
+		return client.lambdaDestroy(currentModel)
 	}
 	return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", action))
 }
@@ -134,7 +124,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 	e := &Event{}
 	e.Model = currentModel
-	if currentModel.VPCConfiguration != nil {
+	if !IsZero(currentModel.VPCConfiguration) {
 		vpc = true
 		e.Kubeconfig, err = getLocalKubeConfig()
 		if err != nil {
@@ -181,12 +171,15 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 }
 
 func (c *Clients) lambdaDestroy(currentModel *Model) handler.ProgressEvent {
+	if IsZero(currentModel.VPCConfiguration) {
+		return makeEvent(currentModel, CompleteStage, nil)
+	}
 	l := newLambdaResource(nil, currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 	err := deleteFunction(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
-	return handler.ProgressEvent{}
+	return makeEvent(currentModel, CompleteStage, nil)
 }
 
 func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {

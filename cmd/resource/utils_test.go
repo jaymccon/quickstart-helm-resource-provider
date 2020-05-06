@@ -1,7 +1,11 @@
 package resource
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -9,6 +13,23 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/stretchr/testify/assert"
 )
+
+type TestDetailParam struct {
+	ID int
+}
+
+type TestDetailSubStructure struct {
+	ID     int
+	Params []TestDetailParam
+}
+
+type TestDetail struct {
+	ID     int
+	Detail Detail
+	Data   TestDetailSubStructure
+}
+
+type Detail interface{}
 
 // TestMergeMaps is to test MergeMaps
 func TestMergeMaps(t *testing.T) {
@@ -28,6 +49,31 @@ func TestMergeMaps(t *testing.T) {
 	}
 	result := mergeMaps(m1, m2)
 	assert.EqualValues(t, expectedMap, result)
+}
+
+func TestProcessValues(t *testing.T) {
+	stringYaml := `root:
+  firstlevel: value
+  secondlevel:
+    - a1
+    - a2
+  string: true`
+
+	m := &Model{
+		Values:    map[string]string{"stack": "true"},
+		ValueYaml: aws.String(stringYaml),
+		//ValueOverrideURL: aws.String("s3://test/test.yaml"),
+	}
+
+	eRes := map[string]interface{}{"root": map[string]interface{}{"firstlevel": "value", "secondlevel": []interface{}{"a1", "a2"}, "string": true}, "stack": "true"}
+	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
+	_, _ = dlLoggingSvcNoChunk(data)
+
+	c := NewMockClient(t)
+	result, err := c.processValues(m)
+	assert.Nil(t, err)
+	assert.EqualValues(t, eRes, result)
+
 }
 
 // TestGetChartDetails is to test getChartDetails
@@ -175,12 +221,11 @@ func TestGetReleaseNameSpace(t *testing.T) {
 // TestHTTPDownload is to test downloadHTTP
 func TestHTTPDownload(t *testing.T) {
 	files := []string{"test.tgz", "nonExt"}
-	//expectedRespStatus := 200
-	// generate a test server so we can capture and inspect the request
-	testServer := MakeTestServer(TestFolder)
+	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
+	defer func() { testServer.Close() }()
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
-			//req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+
 			err := downloadHTTP(testServer.URL+"/"+file, "/dev/null")
 			if err != nil {
 				assert.Contains(t, err.Error(), "At Downloading file")
@@ -354,4 +399,81 @@ func TestHash(t *testing.T) {
 	expectedHash := aws.String("0cbc6611f5540bd0809a388dc95a615b")
 	result := getHash(str)
 	assert.EqualValues(t, aws.StringValue(expectedHash), aws.StringValue(result))
+}
+
+func TestZero(t *testing.T) {
+	one, zeroInt := 1, 0
+
+	type myString string
+
+	var interface1, interfaceZero interface{} = &one, &zeroInt
+
+	var (
+		zeroDetail1 Detail = &struct{}{}
+		zeroDetail2 Detail = &TestDetail{}
+		zeroDetail3 Detail = struct{}{}
+		zeroDetail4 Detail = &TestDetail{}
+		zeroDetail5 Detail = &TestDetail{Data: TestDetailSubStructure{Params: nil}}
+		zeroDetail6 Detail = &TestDetail{Data: TestDetailSubStructure{
+			Params: make([]TestDetailParam, 0, 10)},
+		}
+
+		nonZeroDetail1 Detail = &TestDetail{Data: TestDetailSubStructure{
+			Params: []TestDetailParam{TestDetailParam{55}}},
+		}
+		nonZeroDetail2 Detail = &TestDetail{Data: TestDetailSubStructure{ID: 1234}}
+		nonZeroDetail3 Detail = &TestDetail{ID: 1234}
+		nonZeroDetail4 Detail = &TestDetail{Detail: nonZeroDetail3}
+	)
+
+	for i, test := range []struct {
+		v    interface{}
+		want bool
+	}{
+		// basic types
+		{0, true},
+		{complex(0, 0), true},
+		{1, false},
+		{1.0, false},
+		{true, false},
+		{0.0, true},
+		{"foo", false},
+		{"", true},
+		{myString(""), true},     // different types
+		{myString("foo"), false}, // different types
+		// slices
+		{[]string{"foo"}, false},
+		{[]string(nil), true},
+		{[]string{}, true},
+		// maps
+		{map[string][]int{"foo": {1, 2, 3}}, false},
+		{map[string][]int{"foo": {1, 2, 3}}, false},
+		{map[string][]int{}, true},
+		{map[string][]int(nil), true},
+		// pointers
+		{&one, false},
+		{&zeroInt, true},
+		{new(bytes.Buffer), true},
+		// arrays
+		{[...]int{1, 2, 3}, false},
+
+		// interfaces
+		{&interface1, false},
+		{&interfaceZero, true},
+		// special case for structures
+		{zeroDetail1, true},
+		{zeroDetail2, true},
+		{zeroDetail3, true},
+		{zeroDetail4, true},
+		{zeroDetail5, true},
+		{zeroDetail6, true},
+		{nonZeroDetail1, false},
+		{nonZeroDetail2, false},
+		{nonZeroDetail3, false},
+		{nonZeroDetail4, false},
+	} {
+		if IsZero(test.v) != test.want {
+			t.Errorf("Zero(%v)[%d] = %t", test.v, i, !test.want)
+		}
+	}
 }

@@ -22,6 +22,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	v1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +80,33 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
- name: my-service`
+ name: my-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+ name: lb-service
+ spec:
+  type: LoadBalancer
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+ name: nginx-ds
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+ name: nginx-ss
+
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress `
 
 var TestPendingManifest = `apiVersion: apps/v1
 kind: Deployment
@@ -95,7 +122,7 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 	header := http.Header{}
 	header.Set("Content-Type", runtime.ContentTypeJSON)
 	codec := scheme.Codecs.LegacyCodec(scheme.Scheme.PrioritizedVersionsAllGroups()...)
-	ns, svc, dep, pdep := TestKubeData()
+	td := testKubeData()
 	return func() *resource.Builder {
 		return resource.NewFakeBuilder(
 			func(version schema.GroupVersion) (resource.RESTClient, error) {
@@ -105,13 +132,21 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 					Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 						switch p, m := req.URL.Path, req.Method; {
 						case p == "/namespaces/test/services" && m == "POST":
-							return &http.Response{StatusCode: http.StatusCreated, Header: header, Body: ObjBody(codec, ns)}, nil
+							return &http.Response{StatusCode: http.StatusCreated, Header: header, Body: ObjBody(codec, td.ns)}, nil
 						case p == "/namespaces/default/deployments/nginx-deployment" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, dep)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.dep)}, nil
 						case p == "/namespaces/default/deployments/nginx-deployment-foo" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, pdep)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.pdep)}, nil
 						case p == "/namespaces/default/services/my-service" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, svc)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.svc)}, nil
+						case p == "/namespaces/default/services/lb-service" && m == "GET":
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.lsvc)}, nil
+						case p == "/namespaces/default/daemonsets/nginx-ds" && m == "GET":
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ds)}, nil
+						case p == "/namespaces/default/statefulsets/nginx-ss" && m == "GET":
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ss)}, nil
+						case p == "/ingress/test-ingress" && m == "GET":
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ing)}, nil
 						default:
 							t.Fatalf("unexpected request: %#v\n%#v", req.URL, req)
 							return nil, nil
@@ -141,8 +176,7 @@ func NewMockClient(t *testing.T) *Clients {
 		ClientSet:       fakeclientset.NewSimpleClientset(),
 		HelmClient:      h,
 		Settings:        cli.New(),
-
-		AWSClients: &mockAWSClients{AWSSession: MockSession},
+		AWSClients:      &mockAWSClients{AWSSession: MockSession},
 	}
 }
 
@@ -227,30 +261,14 @@ func testDynamicResources() []*restmapper.APIGroupResources {
 				"v1": {
 					{Name: "deployments", Namespaced: true, Kind: "Deployment"},
 					{Name: "replicasets", Namespaced: true, Kind: "ReplicaSet"},
+					{Name: "statefulsets", Namespaced: true, Kind: "StatefulSet"},
+					{Name: "daemonsets", Namespaced: true, Kind: "DaemonSet"},
 				},
 			},
 		},
 		{
 			Group: metav1.APIGroup{
-				Name: "autoscaling",
-				Versions: []metav1.GroupVersionForDiscovery{
-					{Version: "v1"},
-					{Version: "v2beta1"},
-				},
-				PreferredVersion: metav1.GroupVersionForDiscovery{Version: "v2beta1"},
-			},
-			VersionedResources: map[string][]metav1.APIResource{
-				"v1": {
-					{Name: "horizontalpodautoscalers", Namespaced: true, Kind: "HorizontalPodAutoscaler"},
-				},
-				"v2beta1": {
-					{Name: "horizontalpodautoscalers", Namespaced: true, Kind: "HorizontalPodAutoscaler"},
-				},
-			},
-		},
-		{
-			Group: metav1.APIGroup{
-				Name: "storage.k8s.io",
+				Name: "networking.k8s.io",
 				Versions: []metav1.GroupVersionForDiscovery{
 					{Version: "v1beta1"},
 					{Version: "v0"},
@@ -259,11 +277,7 @@ func testDynamicResources() []*restmapper.APIGroupResources {
 			},
 			VersionedResources: map[string][]metav1.APIResource{
 				"v1beta1": {
-					{Name: "storageclasses", Namespaced: false, Kind: "StorageClass"},
-				},
-				// bogus version of a known group/version/resource to make sure kubectl falls back to generic object mode
-				"v0": {
-					{Name: "storageclasses", Namespaced: false, Kind: "StorageClass"},
+					{Name: "ingress", Namespaced: false, Kind: "Ingress"},
 				},
 			},
 		},
@@ -350,28 +364,54 @@ func buildChart(opts ...chartOption) *chart.Chart {
 	return c.Chart
 }
 
-func MakeTestServer(folder string) *httptest.Server {
-	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(folder))))
-	defer func() { testServer.Close() }()
-	return testServer
+type td struct {
+	ns   *v1.Namespace
+	dep  *appsv1.Deployment
+	pdep *appsv1.Deployment
+	svc  *v1.Service
+	lsvc *v1.Service
+	ds   *appsv1.DaemonSet
+	ss   *appsv1.StatefulSet
+	ing  *v1beta1.Ingress
 }
 
-func TestKubeData() (*v1.Namespace, *v1.Service, *appsv1.Deployment, *appsv1.Deployment) {
-	ns := &v1.Namespace{}
-	ns.Name = "test"
+func testKubeData() *td {
+	t := &td{}
+	t.ns = &v1.Namespace{}
+	t.ns.Name = "test"
 
-	dep := &appsv1.Deployment{}
-	dep.Name = "nginx-deployment"
-	dep.Status.ReadyReplicas = int32(2)
-	dep.Spec.Replicas = aws.Int32(2)
+	t.dep = &appsv1.Deployment{}
+	t.dep.Name = "nginx-deployment"
+	t.dep.Status.ReadyReplicas = int32(2)
+	t.dep.Spec.Replicas = aws.Int32(2)
 
-	pdep := &appsv1.Deployment{}
-	pdep.Name = "nginx-deployment-foo"
-	pdep.Status.ReadyReplicas = int32(1)
-	pdep.Spec.Replicas = aws.Int32(2)
+	t.pdep = &appsv1.Deployment{}
+	t.pdep.Name = "nginx-deployment-foo"
+	t.pdep.Status.ReadyReplicas = int32(1)
+	t.pdep.Spec.Replicas = aws.Int32(2)
 
-	svc := &v1.Service{}
-	svc.Name = "my-service"
+	t.svc = &v1.Service{}
+	t.svc.Name = "my-service"
 
-	return ns, svc, dep, pdep
+	t.lsvc = &v1.Service{}
+	t.lsvc.Name = "lb-service"
+	t.lsvc.Spec.Type = v1.ServiceTypeLoadBalancer
+	t.lsvc.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "elb.test.com"}}
+
+	t.ds = &appsv1.DaemonSet{}
+	t.ds.Name = "nginx-ds"
+	t.ds.Status.NumberUnavailable = int32(0)
+	t.ds.Status.NumberReady = int32(1)
+	t.ds.Status.NumberAvailable = int32(1)
+
+	t.ss = &appsv1.StatefulSet{}
+	t.ss.Name = "nginx-ss"
+	t.ss.Status.ReadyReplicas = int32(2)
+	t.ss.Spec.Replicas = aws.Int32(2)
+
+	t.ing = &v1beta1.Ingress{}
+	t.ing.Name = "test-ingress"
+	t.ing.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "ingress.test.com"}}
+
+	return t
 }
