@@ -101,6 +101,24 @@ func (m *mockEKSClient) DescribeCluster(c *eks.DescribeClusterInput) (*eks.Descr
 				},
 			},
 		},
+		"private-nonat": {
+			data: &eks.Cluster{
+				Arn: aws.String("arn:aws:eks:us-east-2:1234567890:cluster/private"),
+				CertificateAuthority: &eks.Certificate{
+					Data: aws.String("LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0="),
+				},
+				Endpoint: aws.String("https://private.yl4.us-east-2.eks.amazonaws.com"),
+				Name:     aws.String("eks"),
+				Status:   aws.String(eks.ClusterStatusActive),
+				ResourcesVpcConfig: &eks.VpcConfigResponse{
+					EndpointPublicAccess:  aws.Bool(false),
+					PublicAccessCidrs:     aws.StringSlice([]string{"0.0.0.0/0"}),
+					EndpointPrivateAccess: aws.Bool(true),
+					SecurityGroupIds:      aws.StringSlice([]string{"sg-01"}),
+					SubnetIds:             aws.StringSlice([]string{"subnet-01"}),
+				},
+			},
+		},
 		"eks1": {
 			data: &eks.Cluster{
 				Arn:    aws.String("arn:aws:eks:us-east-2:1234567890:cluster/eks1"),
@@ -132,9 +150,13 @@ func (m *mockEKSClient) DescribeCluster(c *eks.DescribeClusterInput) (*eks.Descr
 	}, fmt.Errorf("%s", eks.ErrCodeNotFoundException)
 }
 
-func (m *mockEC2Client) DescribeSubnets(*ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error) {
+func (m *mockEC2Client) DescribeSubnets(i *ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error) {
+	subnets := []*ec2.Subnet{}
+	for _, subnet := range i.SubnetIds {
+		subnets = append(subnets, &ec2.Subnet{SubnetId: subnet, VpcId: aws.String("vpc-01")})
+	}
 	return &ec2.DescribeSubnetsOutput{
-		Subnets: []*ec2.Subnet{&ec2.Subnet{SubnetId: aws.String("subnet-01"), VpcId: aws.String("vpc-01")}, &ec2.Subnet{SubnetId: aws.String("subnet-02"), VpcId: aws.String("vpc-01")}},
+		Subnets: subnets,
 	}, nil
 }
 
@@ -142,11 +164,20 @@ func (m *mockEC2Client) DescribeRouteTables(i *ec2.DescribeRouteTablesInput) (*e
 	d := map[string]*ec2.RouteTable{
 		"subnet-01": &ec2.RouteTable{Routes: []*ec2.Route{&ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), GatewayId: aws.String("igw-01")}, &ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), GatewayId: aws.String("igw-01")}}},
 		"subnet-02": &ec2.RouteTable{Routes: []*ec2.Route{&ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), GatewayId: aws.String("igw-01")}, &ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), NatGatewayId: aws.String("nat-01")}}},
+		"vpc-01":    &ec2.RouteTable{Routes: []*ec2.Route{&ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), GatewayId: aws.String("igw-01")}, &ec2.Route{DestinationCidrBlock: aws.String("1.1.1.1/1"), NatGatewayId: aws.String("nat-01")}}},
 	}
 	var s string
 	for _, filter := range i.Filters {
+		if aws.StringValue(filter.Name) == "association.main" {
+			s = "vpc-01"
+			break
+		}
 		if aws.StringValue(filter.Name) == "association.subnet-id" {
 			s = aws.StringValue(filter.Values[0])
+			if s == "subnet-03" {
+				return &ec2.DescribeRouteTablesOutput{RouteTables: []*ec2.RouteTable{}}, nil
+			}
+
 		}
 	}
 
@@ -206,7 +237,7 @@ func (m *mockSTSClient) GetCallerIdentityRequest(*sts.GetCallerIdentityInput) (r
 	return
 }
 
-func (m *mockS3Client) HeadBucketRequest(input *s3.HeadBucketInput) (req *request.Request, output *s3.HeadBucketOutput){
+func (m *mockS3Client) HeadBucketRequest(input *s3.HeadBucketInput) (req *request.Request, output *s3.HeadBucketOutput) {
 	op := &request.Operation{
 		Name:       "HeadObject",
 		HTTPMethod: "POST",
@@ -222,27 +253,10 @@ func (m *mockS3Client) HeadBucketRequest(input *s3.HeadBucketInput) (req *reques
 	return
 }
 
-/*func (m *mockS3Client) GetObjectRequest(input *s3.GetObjectInput) (req *request.Request, output *s3.GetObjectOutput) {
-	op := &request.Operation{
-		Name:       "GetObject",
-		HTTPMethod: "GET",
-		HTTPPath:   "/{Bucket}/{Key+}",
-	}
-
-	if input == nil {
-		input = &s3.GetObjectInput{}
-	}
-
-	output = &s3.GetObjectOutput{}
-
-	req = awsRequest(op, input, output)
-	return
-}*/
-
-func (m *mockS3Client) GetObjectWithContext(ctx aws.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error){
+func (m *mockS3Client) GetObjectWithContext(ctx aws.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error) {
 	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
 	return &s3.GetObjectOutput{
-		Body: ioutil.NopCloser(bytes.NewReader(data[:])),
+		Body:          ioutil.NopCloser(bytes.NewReader(data[:])),
 		ContentLength: aws.Int64(int64(len(data))),
 	}, nil
 }
@@ -418,7 +432,13 @@ func TestGetVpcConfig(t *testing.T) {
 				ClusterID: aws.String("private"),
 			},
 		},
+		"PrivateWithoutNatGW": {
+			m: &Model{
+				ClusterID: aws.String("private-nonat"),
+			},
+		},
 	}
+	eErr := "no subnets with NAT Gateway found"
 	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
 		return NewMockClient(t), nil
 	}
@@ -426,16 +446,33 @@ func TestGetVpcConfig(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			//d.m.VPCConfiguration = nil
 			_, err := getVpcConfig(MockSession, d.m)
-			assert.Nil(t, err)
+			if err != nil {
+				assert.Contains(t, err.Error(), eErr)
+			}
+
 		})
 	}
 }
 
 func TestFilterNattedSubnets(t *testing.T) {
 	mockSvc := &mockEC2Client{}
-	subnets := []*string{aws.String("subnet-01"), aws.String("subnet-02")}
-	eSubnets := []*string{aws.String("subnet-02")}
-	result, err := filterNattedSubnets(mockSvc, subnets)
-	assert.Nil(t, err)
-	assert.ElementsMatch(t, eSubnets, result)
+	tests := map[string]struct {
+		subnets  []*string
+		eSubnets []*string
+	}{
+		"NATSubnets": {
+			subnets:  []*string{aws.String("subnet-01"), aws.String("subnet-02"), aws.String("subnet-03")},
+			eSubnets: []*string{aws.String("subnet-02"), aws.String("subnet-03")},
+		},
+		"NoSubnets": {
+			subnets: []*string{aws.String("subnet-01")},
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := filterNattedSubnets(mockSvc, d.subnets)
+			assert.Nil(t, err)
+			assert.ElementsMatch(t, d.eSubnets, result)
+		})
+	}
 }

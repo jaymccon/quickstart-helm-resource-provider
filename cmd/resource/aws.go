@@ -247,6 +247,9 @@ func getVpcConfig(session *session.Session, model *Model) (*VPCConfiguration, er
 	if err != nil {
 		return nil, err
 	}
+	if IsZero(subnets){
+		return nil, fmt.Errorf("no subnets with NAT Gateway found for the cluster %s, use VPCConfiguration to specify VPC settings", aws.StringValue(model.ClusterID))
+	}
 	log.Printf("Using Subnets: %v, SecurityGroups: %v", aws.StringValueSlice(subnets), aws.StringValueSlice(resp.resourcesVpcConfig.SecurityGroupIds))
 
 	return &VPCConfiguration{
@@ -277,6 +280,23 @@ func filterNattedSubnets(ec2client ec2iface.EC2API, subnets []*string) (filtered
 		})
 		if err != nil {
 			return filtered, err
+		}
+		if IsZero(resp.RouteTables) {
+			resp, err = ec2client.DescribeRouteTables(&ec2.DescribeRouteTablesInput{
+				Filters: []*ec2.Filter{
+					{
+						Name:   aws.String("association.main"),
+						Values: []*string{aws.String("true")},
+					},
+					{
+						Name:   aws.String("vpc-id"),
+						Values: []*string{subnet.VpcId},
+					},
+				},
+			})
+			if err != nil {
+				return filtered, err
+			}
 		}
 		for _, route := range resp.RouteTables[0].Routes {
 			if route.NatGatewayId != nil {
