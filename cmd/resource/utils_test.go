@@ -62,10 +62,10 @@ func TestProcessValues(t *testing.T) {
 	m := &Model{
 		Values:    map[string]string{"stack": "true"},
 		ValueYaml: aws.String(stringYaml),
-		//ValueOverrideURL: aws.String("s3://test/test.yaml"),
+		ValueOverrideURL: aws.String("s3://test/test.yaml"),
 	}
 
-	eRes := map[string]interface{}{"root": map[string]interface{}{"firstlevel": "value", "secondlevel": []interface{}{"a1", "a2"}, "string": true}, "stack": "true"}
+	eRes := map[string]interface {}{"root":map[string]interface {}{"file":true, "firstlevel":"value", "secondlevel":[]interface {}{"a1", "a2"}, "string":true}, "stack":"true"}
 	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
 	_, _ = dlLoggingSvcNoChunk(data)
 
@@ -322,6 +322,21 @@ func TestDecodeID(t *testing.T) {
 	result, _ := DecodeID(sID)
 	assert.EqualValues(t, eID, result)
 }
+
+// TestDownloadChart is to test downloadChart
+func TestDownloadChart(t *testing.T) {
+	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
+	defer func() { testServer.Close() }()
+	files := []string{testServer.URL+"/test.tgz",  "s3://buctket/key"}
+	c := NewMockClient(t)
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			err := c.downloadChart(file, "/dev/null")
+			assert.Nil(t, err)
+		})
+	}
+}
+
 
 // TestCheckTimeOut to test checkTimeOut
 func TestCheckTimeOut(t *testing.T) {

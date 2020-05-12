@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client/metadata"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -202,17 +201,50 @@ func (m *mockSTSClient) GetCallerIdentityRequest(*sts.GetCallerIdentityInput) (r
 		Arn:     aws.String("arn:aws:sts::1234567890:assumed-role/TestRole/session-1587810408"),
 		UserId:  aws.String("AROA4OQMRFUSJUBK2CBCZ:session-1587810408"),
 	}
-	c := MockSession.ClientConfig("Mock", aws.NewConfig().WithRegion("us-east-2"))
-	meta := metadata.ClientInfo{
-		ServiceName:   "Mock",
-		SigningRegion: c.SigningRegion,
-		Endpoint:      c.Endpoint,
-		APIVersion:    "2015-12-08",
-		JSONVersion:   "1.1",
-		TargetPrefix:  "MockServer",
-	}
-	req = request.New(*c.Config, meta, c.Handlers, nil, op, input, output)
+
+	req = awsRequest(op, input, output)
 	return
+}
+
+func (m *mockS3Client) HeadBucketRequest(input *s3.HeadBucketInput) (req *request.Request, output *s3.HeadBucketOutput){
+	op := &request.Operation{
+		Name:       "HeadObject",
+		HTTPMethod: "POST",
+		HTTPPath:   "/",
+	}
+	if input == nil {
+		input = &s3.HeadBucketInput{}
+	}
+
+	output = &s3.HeadBucketOutput{}
+
+	req = awsRequest(op, input, output)
+	return
+}
+
+/*func (m *mockS3Client) GetObjectRequest(input *s3.GetObjectInput) (req *request.Request, output *s3.GetObjectOutput) {
+	op := &request.Operation{
+		Name:       "GetObject",
+		HTTPMethod: "GET",
+		HTTPPath:   "/{Bucket}/{Key+}",
+	}
+
+	if input == nil {
+		input = &s3.GetObjectInput{}
+	}
+
+	output = &s3.GetObjectOutput{}
+
+	req = awsRequest(op, input, output)
+	return
+}*/
+
+func (m *mockS3Client) GetObjectWithContext(ctx aws.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error){
+	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
+	return &s3.GetObjectOutput{
+		Body: ioutil.NopCloser(bytes.NewReader(data[:])),
+		ContentLength: aws.Int64(int64(len(data))),
+	}, nil
 }
 
 func testSetupGetBucketRegionServer(region string, statusCode int, incHeader bool) *httptest.Server {

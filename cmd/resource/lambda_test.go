@@ -60,6 +60,14 @@ func (m *mockLambdaClient) GetFunction(i *lambda.GetFunctionInput) (*lambda.GetF
 			},
 		}, nil
 	}
+	if aws.StringValue(i.FunctionName) == "helm-provider-vpc-connector-38919e8bbd92924c6d275cf1409ff027" {
+		return &lambda.GetFunctionOutput{
+			Configuration: &lambda.FunctionConfiguration{
+				State:      aws.String("Pending"),
+				CodeSha256: aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
+			},
+		}, nil
+	}
 	return nil, awserr.New(lambda.ErrCodeResourceNotFoundException, "NotFound", fmt.Errorf("NotFound"))
 }
 

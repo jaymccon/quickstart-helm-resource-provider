@@ -28,7 +28,7 @@ To declare this entity in your AWS CloudFormation template, use the following sy
 
 #### SecurityGroupIds
 
-Specify one or more security groups.
+Specify one or more security groups
 
 _Required_: No
 
@@ -38,7 +38,7 @@ _Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormati
 
 #### SubnetIds
 
-Specify one or more subnets.
+Specify one or more subnets
 
 _Required_: No
 

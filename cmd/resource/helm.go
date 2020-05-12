@@ -251,7 +251,7 @@ func (c *Clients) HelmStatus(name string) (*HelmStatusData, error) {
 			h.Chart = res.Chart.Metadata.Name + "-" + res.Chart.Metadata.Version
 		}
 	}
-	log.Printf("Found release in %s Status", h.Status)
+	log.Printf("Found release in %s status", h.Status)
 	return h, nil
 }
 

@@ -258,16 +258,16 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 			if d.ObjectMeta.Namespace == "" {
 				namespace = "default"
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
+			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.NumberReady=%d", d.ObjectMeta.Name, d.Status.NumberReady), resources); err != nil {
+			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberReady=%d", d.ObjectMeta.Name, d.Status.NumberReady), resources); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.NumberAvailable=%d", d.ObjectMeta.Name, d.Status.NumberAvailable), resources); err != nil {
+			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberAvailable=%d", d.ObjectMeta.Name, d.Status.NumberAvailable), resources); err != nil {
 				return nil, err
 			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.NumberUnavailable=%d", d.ObjectMeta.Name, d.Status.NumberUnavailable), resources); err != nil {
+			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberUnavailable=%d", d.ObjectMeta.Name, d.Status.NumberUnavailable), resources); err != nil {
 				return nil, err
 			}
 		case "StatefulSet":

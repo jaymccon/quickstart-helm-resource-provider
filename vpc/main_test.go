@@ -41,6 +41,7 @@ func TestHandler(t *testing.T) {
 	tests := map[string]struct {
 		m      *resource.Model
 		action resource.Action
+		eError *string
 	}{
 		"InstallReleaseAction": {
 			m: &resource.Model{
@@ -84,6 +85,20 @@ func TestHandler(t *testing.T) {
 			},
 			action: resource.ListReleaseAction,
 		},
+		"Unknown": {
+			m: &resource.Model{
+				ID: aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoib25lIiwiTmFtZXNwYWNlIjoiZGVmYXVsdCJ9"),
+			},
+			action: "Unknown",
+			eError: aws.String("Unhandled stage"),
+		},
+		"DecodeError": {
+			m: &resource.Model{
+				ID: aws.String("test"),
+			},
+			action: resource.ListReleaseAction,
+			eError: aws.String("At Json Unmarshal"),
+		},
 	}
 	resource.NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*resource.Clients, error) {
 		return resource.NewMockClient(t), nil
@@ -93,7 +108,9 @@ func TestHandler(t *testing.T) {
 			event.Model = d.m
 			event.Action = d.action
 			_, err := HandleRequest(context.Background(), event)
-			assert.Nil(t, err)
+			if err != nil {
+				assert.Contains(t, err.Error(), aws.StringValue(d.eError))
+			}
 		})
 	}
 }

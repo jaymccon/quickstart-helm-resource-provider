@@ -74,17 +74,16 @@ const (
 )
 
 func createFunction(svc LambdaAPI, l *lambdaResource) error {
-	log.Printf("Creating the VPC connector %s", FunctionNamePrefix+*l.nameSuffix)
+	log.Printf("Creating the VPC connector %s", aws.StringValue(l.functionName))
 	zip, _, err := getZip(l.functionFile)
 	if err != nil {
 		return AWSError(err)
 	}
-	funcName := FunctionNamePrefix + *l.nameSuffix
 	input := &lambda.CreateFunctionInput{
 		Code: &lambda.FunctionCode{
 			ZipFile: zip,
 		},
-		FunctionName: aws.String(funcName),
+		FunctionName: l.functionName,
 		Handler:      aws.String(Handler),
 		MemorySize:   aws.Int64(MemorySize),
 		Role:         l.roleArn,
@@ -100,7 +99,7 @@ func createFunction(svc LambdaAPI, l *lambdaResource) error {
 	// Resource already exists error is fine
 	if awsErr, ok := err.(awserr.Error); ok {
 		if awsErr.Code() == lambda.ErrCodeResourceConflictException {
-			log.Printf("Lambda function %v already exists: %v", funcName, awsErr.Message())
+			log.Printf("Lambda function %v already exists: %v", aws.StringValue(l.functionName), awsErr.Message())
 			return nil
 		}
 	}

@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +24,10 @@ func TestInitialize(t *testing.T) {
 	vpc := &VPCConfiguration{
 		SecurityGroupIds: []string{"sg-01"},
 		SubnetIds:        []string{"subnet-01"},
+	}
+	vpcPending := &VPCConfiguration{
+		SecurityGroupIds: []string{"sg-01"},
+		SubnetIds:        []string{"subnet-02"},
 	}
 	data := []byte("Test")
 	_ = ioutil.WriteFile(KubeConfigLocalPath, data, 0644)
@@ -70,20 +76,39 @@ func TestInitialize(t *testing.T) {
 			vpc:       true,
 			nextStage: CompleteStage,
 		},
+		"Unknown": {
+			action:    CheckReleaseAction,
+			name:      "one",
+			vpc:       false,
+			nextStage: NoStage,
+		},
+		"PendingLambda": {
+			action:    InstallReleaseAction,
+			name:      "Test",
+			vpc:       true,
+			nextStage: LambdaStabilize,
+		},
 	}
 
 	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
 		return NewMockClient(t), nil
 	}
-
+	var eRes handler.ProgressEvent
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			if d.vpc {
 				m.VPCConfiguration = vpc
+				if name == "PendingLambda" {
+					m.VPCConfiguration = vpcPending
+				}
 			}
 			m.Name = aws.String(d.name)
 			m.ID = nil
-			eRes := makeEvent(m, d.nextStage, nil)
+			if name == "Unknown"{
+				eRes = makeEvent(m, d.nextStage, fmt.Errorf("Unhandled stage %s", d.action))
+			} else {
+				eRes = makeEvent(m, d.nextStage, nil)
+			}
 			res := initialize(MockSession, m, d.action)
 			assert.EqualValues(t, eRes, res)
 		})
@@ -99,7 +124,10 @@ func TestCheckReleaseStatus(t *testing.T) {
 		SecurityGroupIds: []string{"sg-01"},
 		SubnetIds:        []string{"subnet-01"},
 	}
-	c := NewMockClient(t)
+	vpcPending := &VPCConfiguration{
+		SecurityGroupIds: []string{"sg-01"},
+		SubnetIds:        []string{"subnet-02"},
+	}
 	data := []byte("Test")
 	_ = ioutil.WriteFile(KubeConfigLocalPath, data, 0644)
 	_ = ioutil.WriteFile(ZipFile, data, 0644)
@@ -120,20 +148,49 @@ func TestCheckReleaseStatus(t *testing.T) {
 			vpc:       false,
 			nextStage: CompleteStage,
 		},
+		"Pending": {
+			name:      aws.String("five"),
+			vpc:       false,
+			nextStage: ReleaseStabilize,
+		},
+		"PendingResource": {
+			name:      aws.String("three"),
+			vpc:       false,
+			nextStage: ReleaseStabilize,
+		},
+		"Unknown": {
+			name:      aws.String("four"),
+			vpc:       false,
+			nextStage: NoStage,
+		},
+		"PendingLambda": {
+			name:      aws.String("one"),
+			vpc:       true,
+			nextStage: LambdaStabilize,
+		},
 	}
 
 	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
 		return NewMockClient(t), nil
 	}
-
+	var eRes handler.ProgressEvent
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
+			m.VPCConfiguration = nil
 			if d.vpc {
 				m.VPCConfiguration = vpc
+				if name == "PendingLambda" {
+					m.VPCConfiguration = vpcPending
+				}
 			}
 			m.Name = d.name
-			eRes := makeEvent(m, d.nextStage, nil)
-			res := checkReleaseStatus(c.AWSClients.Session(nil, nil), m, d.nextStage)
+			switch name {
+			case "Unknown":
+				eRes = makeEvent(m, d.nextStage, errors.New("Release failed"))
+			default:
+				eRes = makeEvent(m, d.nextStage, nil)
+			}
+			res := checkReleaseStatus(MockSession, m, d.nextStage)
 			assert.EqualValues(t, eRes, res)
 		})
 	}

@@ -87,6 +87,13 @@ func TestHelmInstall(t *testing.T) {
 			},
 			expectedErr: aws.String("failed to download"),
 		},
+		"Dependency": {
+			m: &Model{Chart: aws.String(testServer.URL + "/dep-0.1.0.tgz")},
+			config: &Config{
+				Name:      aws.String("Dependency"),
+				Namespace: aws.String("default"),
+			},
+		},
 	}
 
 	for name, d := range tests {
@@ -155,7 +162,7 @@ func TestHelmStatus(t *testing.T) {
 func TestHelmList(t *testing.T) {
 	c := NewMockClient(t)
 	hl := []HelmListData{}
-	for _, rel := range []string{"one", "two", "three"} {
+	for _, rel := range []string{"one", "two", "three", "five"} {
 		l := HelmListData{ReleaseName: rel, ChartName: "hello", ChartVersion: "0.1.0", Chart: "hello-0.1.0", Namespace: "default"}
 		hl = append(hl, l)
 	}
@@ -205,6 +212,13 @@ func TestHelmUpgrade(t *testing.T) {
 	}{
 		"HTTPRepo": {
 			m: &Model{Chart: aws.String(testServer.URL + "/test.tgz")},
+			config: &Config{
+				Name:      aws.String("test"),
+				Namespace: aws.String("default"),
+			},
+		},
+		"Dependency": {
+			m: &Model{Chart: aws.String(testServer.URL + "/dep-0.1.0.tgz")},
 			config: &Config{
 				Name:      aws.String("test"),
 				Namespace: aws.String("default"),

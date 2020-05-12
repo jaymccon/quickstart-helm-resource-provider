@@ -119,6 +119,8 @@ _Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormati
 
 #### ID
 
+Primary identifier for Cloudformation
+
 _Required_: No
 
 _Type_: String
@@ -175,5 +177,5 @@ Version can be specified, if not latest will be used
 
 #### Resources
 
-Returns the <code>Resources</code> value.
+Resources from the helm charts
 

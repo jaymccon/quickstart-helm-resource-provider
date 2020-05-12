@@ -56,8 +56,6 @@ type AWSClientsIface interface {
 	Session(region *string, role *string) *session.Session
 }
 
-//var _ AWSClientsIface = (*Clients)(nil)
-
 func (c *AWSClients) S3Client(region *string, role *string) S3API {
 	return s3.New(c.Session(region, role))
 }
@@ -73,6 +71,7 @@ func (c *AWSClients) STSClient(region *string, role *string) STSAPI {
 func (c *AWSClients) SecretsManagerClient(region *string, role *string) SecretsManagerAPI {
 	return secretsmanager.New(c.Session(region, role))
 }
+
 func (c *AWSClients) EKSClient(region *string, role *string) EKSAPI {
 	return eks.New(c.Session(region, role))
 }

@@ -6,7 +6,7 @@ require (
 	github.com/avast/retry-go v2.6.0+incompatible // indirect
 	github.com/aws-cloudformation/cloudformation-cli-go-plugin v0.1.5
 	github.com/aws/aws-lambda-go v1.16.0
-	github.com/aws/aws-sdk-go v1.30.19
+	github.com/aws/aws-sdk-go v1.30.24
 	github.com/gofrs/flock v0.7.1
 	github.com/golang/protobuf v1.3.5 // indirect
 	github.com/googleapis/gnostic v0.3.1 // indirect
@@ -18,7 +18,7 @@ require (
 	golang.org/x/net v0.0.0-20200324143707-d3edc9973b7e // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
-	helm.sh/helm/v3 v3.2.0
+	helm.sh/helm/v3 v3.2.1
 	k8s.io/api v0.18.2
 	k8s.io/apimachinery v0.18.2
 	k8s.io/cli-runtime v0.18.2

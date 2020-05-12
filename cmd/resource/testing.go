@@ -2,6 +2,8 @@ package resource
 
 import (
 	"bytes"
+	"github.com/aws/aws-sdk-go/aws/client/metadata"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -106,7 +108,13 @@ metadata:
 apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
-  name: test-ingress `
+  name: test-ingress
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-demo`
 
 var TestPendingManifest = `apiVersion: apps/v1
 kind: Deployment
@@ -147,6 +155,8 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ss)}, nil
 						case p == "/ingress/test-ingress" && m == "GET":
 							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ing)}, nil
+						case p == "/namespaces/default/configmaps/game-demo" && m == "GET":
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.cm)}, nil
 						default:
 							t.Fatalf("unexpected request: %#v\n%#v", req.URL, req)
 							return nil, nil
@@ -300,6 +310,19 @@ func ActionConfigFixture(t *testing.T) *action.Configuration {
 	}
 }
 
+func awsRequest(op *request.Operation, input, output interface{}) *request.Request {
+	c := MockSession.ClientConfig("Mock", aws.NewConfig().WithRegion("us-east-2"))
+	meta := metadata.ClientInfo{
+		ServiceName:   "Mock",
+		SigningRegion: c.SigningRegion,
+		Endpoint:      c.Endpoint,
+		APIVersion:    "2015-12-08",
+		JSONVersion:   "1.1",
+		TargetPrefix:  "MockServer",
+	}
+	return request.New(*c.Config, meta, c.Handlers, nil, op, input, output)
+}
+
 func makeMeSomeReleases(store *storage.Storage, t *testing.T) {
 	t.Helper()
 	one := namedRelease("one", release.StatusDeployed)
@@ -309,17 +332,21 @@ func makeMeSomeReleases(store *storage.Storage, t *testing.T) {
 	two := namedRelease("two", release.StatusFailed)
 	two.Namespace = "default"
 	two.Version = 2
-	one.Manifest = TestManifest
+	two.Manifest = TestManifest
 	three := namedRelease("three", release.StatusDeployed)
 	three.Namespace = "default"
 	three.Version = 3
-	one.Manifest = TestManifest
-	four := namedRelease("four", release.StatusFailed)
-	three.Namespace = "default"
-	three.Version = 3
-	one.Manifest = TestManifest
+	three.Manifest = TestPendingManifest
+	four := namedRelease("four", "unknown)")
+	four.Namespace = "default"
+	four.Version = 3
+	four.Manifest = TestManifest
+	five := namedRelease("five", release.StatusPendingUpgrade)
+	five.Namespace = "default"
+	five.Version = 3
+	five.Manifest = TestManifest
 
-	for _, rel := range []*release.Release{one, two, three, four} {
+	for _, rel := range []*release.Release{one, two, three, four, five} {
 		if err := store.Create(rel); err != nil {
 			t.Fatal(err)
 		}
@@ -373,6 +400,7 @@ type td struct {
 	ds   *appsv1.DaemonSet
 	ss   *appsv1.StatefulSet
 	ing  *v1beta1.Ingress
+	cm *v1.ConfigMap
 }
 
 func testKubeData() *td {
@@ -412,6 +440,9 @@ func testKubeData() *td {
 	t.ing = &v1beta1.Ingress{}
 	t.ing.Name = "test-ingress"
 	t.ing.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "ingress.test.com"}}
+
+	t.cm = &v1.ConfigMap{}
+	t.cm.Name = "game-demo"
 
 	return t
 }
