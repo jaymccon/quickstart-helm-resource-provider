@@ -8,7 +8,7 @@ COPY . /build
 
 WORKDIR /build
 
-RUN go clean -modcache && GOPROXY=direct go mod tidy
+RUN go clean -modcache && go mod tidy
 
 RUN make -f Makefile.package package
 
