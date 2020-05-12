@@ -1,6 +1,7 @@
 .PHONY: package
 
 package:
+	go clean -modcache
 	go mod tidy
 	cfn generate
 	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -tags="logging callback scheduler" -o bin/handler cmd/main.go
