@@ -25,6 +25,7 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/kube"
+	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -74,12 +75,15 @@ type Inputs struct {
 
 // NewClients is for generate clients for helm, kube and AWS
 var NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+	var err error
 	c := &Clients{}
 	if ses == nil {
-		ses = session.New()
+		ses, err = session.NewSession()
+		if err != nil {
+			return nil, err
+		}
 	}
 	c.AWSClients = &AWSClients{AWSSession: ses}
-	var err error
 	if err := createKubeConfig(c.AWSClients.EKSClient(nil, nil), c.AWSClients.STSClient(nil, nil), c.AWSClients.SecretsManagerClient(nil, nil), cluster, kubeconfig, role, customKubeconfig); err != nil {
 		return nil, err
 	}
@@ -115,7 +119,9 @@ func (c *Clients) processValues(m *Model) (map[string]interface{}, error) {
 	}
 	if m.Values != nil {
 		for k, v := range m.Values {
-			values[k] = v
+			if err := strvals.ParseInto(fmt.Sprintf("%s=%s", k, v), values); err != nil {
+				return nil, genericError("Processing values", err)
+			}
 		}
 	}
 	base := mergeMaps(valueYaml, values)

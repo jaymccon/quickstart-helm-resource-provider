@@ -11,6 +11,11 @@ import (
 	"helm.sh/helm/v3/pkg/repo"
 )
 
+func  TestHelmClientInvoke(t *testing.T) {
+	_, err  := helmClientInvoke(aws.String("default"))
+	assert.Nil(t, err)
+}
+
 // TestAddHelmRepoUpdate to test addHelmRepoUpdate
 func TestAddHelmRepoUpdate(t *testing.T) {
 	c := NewMockClient(t)

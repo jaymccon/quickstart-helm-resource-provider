@@ -58,22 +58,45 @@ func TestProcessValues(t *testing.T) {
     - a1
     - a2
   string: true`
-
-	m := &Model{
-		Values:    map[string]string{"stack": "true"},
-		ValueYaml: aws.String(stringYaml),
-		ValueOverrideURL: aws.String("s3://test/test.yaml"),
+	tests := map[string]struct {
+		m    *Model
+		eRes map[string]interface{}
+		eErr string
+	}{
+		"CorrectValues": {
+			m: &Model{
+				Values:           map[string]string{"stack": "true"},
+				ValueYaml:        aws.String(stringYaml),
+				ValueOverrideURL: aws.String("s3://test/test.yaml"),
+			},
+			eRes: map[string]interface{}{"root": map[string]interface{}{"file": true, "firstlevel": "value", "secondlevel": []interface{}{"a1", "a2"}, "string": true}, "stack": "true"},
+		},
+		"WrongYaml": {
+			m: &Model{
+				ValueYaml: aws.String("stringYaml"),
+			},
+			eErr: "error unmarshaling JSON",
+		},
+		"WrongPath": {
+			m: &Model{
+				ValueOverrideURL: aws.String("../test"),
+			},
+			eErr: "InvalidParameter",
+		},
 	}
-
-	eRes := map[string]interface {}{"root":map[string]interface {}{"file":true, "firstlevel":"value", "secondlevel":[]interface {}{"a1", "a2"}, "string":true}, "stack":"true"}
 	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
 	_, _ = dlLoggingSvcNoChunk(data)
 
 	c := NewMockClient(t)
-	result, err := c.processValues(m)
-	assert.Nil(t, err)
-	assert.EqualValues(t, eRes, result)
-
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := c.processValues(d.m)
+			if err != nil {
+				assert.Contains(t, err.Error(), d.eErr)
+			}
+			assert.EqualValues(t, d.eRes, result)
+		})
+	}
 }
 
 // TestGetChartDetails is to test getChartDetails
@@ -118,6 +141,18 @@ func TestGetChartDetails(t *testing.T) {
 				ChartVersion: aws.String("1.0.0"),
 			},
 			expectedError: nil,
+		},
+		"test4": {
+			m: &Model{
+				Chart: aws.String("s3://test/chart-1.0.1.tgz"),
+			},
+			expectedChart: &Chart{
+				Chart:        aws.String("/tmp/chart.tgz"),
+				ChartName:    aws.String("chart"),
+				ChartType:    aws.String("Local"),
+				ChartPath:    aws.String("s3://test/chart-1.0.1.tgz"),
+				ChartRepoURL: aws.String("https://kubernetes-charts.storage.googleapis.com"),
+			},
 		},
 	}
 	for name, d := range tests {
@@ -312,22 +347,31 @@ func TestGenerateID(t *testing.T) {
 
 // TestDecodeID is to test DecodeID
 func TestDecodeID(t *testing.T) {
-	sID := aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ")
+	sIDs := []*string{aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"), aws.String("wrong")}
 	eID := &ID{
 		ClusterID: "eks",
 		Name:      "Test",
 		Region:    "eu-west-1",
 		Namespace: "Test",
 	}
-	result, _ := DecodeID(sID)
-	assert.EqualValues(t, eID, result)
+	eErr := "illegal base64 data "
+	for _, sID := range sIDs {
+		t.Run("test", func(t *testing.T) {
+			result, err := DecodeID(sID)
+			if err != nil {
+				assert.Contains(t, err.Error(), eErr)
+			} else {
+				assert.EqualValues(t, eID, result)
+			}
+		})
+	}
 }
 
 // TestDownloadChart is to test downloadChart
 func TestDownloadChart(t *testing.T) {
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
-	files := []string{testServer.URL+"/test.tgz",  "s3://buctket/key"}
+	files := []string{testServer.URL + "/test.tgz", "s3://buctket/key"}
 	c := NewMockClient(t)
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
@@ -336,7 +380,6 @@ func TestDownloadChart(t *testing.T) {
 		})
 	}
 }
-
 
 // TestCheckTimeOut to test checkTimeOut
 func TestCheckTimeOut(t *testing.T) {
@@ -454,6 +497,7 @@ func TestZero(t *testing.T) {
 		{0.0, true},
 		{"foo", false},
 		{"", true},
+		{int64(0), true},
 		{myString(""), true},     // different types
 		{myString("foo"), false}, // different types
 		// slices
