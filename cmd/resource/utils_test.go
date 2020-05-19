@@ -65,11 +65,11 @@ func TestProcessValues(t *testing.T) {
 	}{
 		"CorrectValues": {
 			m: &Model{
-				Values:           map[string]string{"stack": "true"},
+				Values:           map[string]string{"stack.nested": "true"},
 				ValueYaml:        aws.String(stringYaml),
 				ValueOverrideURL: aws.String("s3://test/test.yaml"),
 			},
-			eRes: map[string]interface{}{"root": map[string]interface{}{"file": true, "firstlevel": "value", "secondlevel": []interface{}{"a1", "a2"}, "string": true}, "stack": "true"},
+			eRes: map[string]interface{}{"root": map[string]interface{}{"file": true, "firstlevel": "value", "secondlevel": []interface{}{"a1", "a2"}, "string": true}, "stack": map[string]interface{}{"nested": true}},
 		},
 		"WrongYaml": {
 			m: &Model{

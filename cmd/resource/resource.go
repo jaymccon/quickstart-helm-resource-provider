@@ -74,7 +74,7 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 	currentModel.Namespace = aws.String(data.Namespace)
 	currentModel.Chart = aws.String(s.ChartName)
 	currentModel.Version = aws.String(s.ChartVersion)
-	e := &Event{}
+	/*e := &Event{}
 	e.Model = currentModel
 	e.ReleaseData = &ReleaseData{
 		Name:      data.Name,
@@ -104,7 +104,7 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 	currentModel.Resources, err = client.kubeResourcesWrapper(&data.Name, e, l.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
-	}
+	}*/
 	return makeEvent(currentModel, CompleteStage, nil), nil
 }
 

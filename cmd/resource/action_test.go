@@ -103,8 +103,8 @@ func TestInitialize(t *testing.T) {
 				}
 			}
 			m.Name = aws.String(d.name)
-			m.ID = nil
-			if name == "Unknown"{
+			m.ID, _ = generateID(m, d.name, "eu-west-1", "default")
+			if name == "Unknown" {
 				eRes = makeEvent(m, d.nextStage, fmt.Errorf("Unhandled stage %s", d.action))
 			} else {
 				eRes = makeEvent(m, d.nextStage, nil)

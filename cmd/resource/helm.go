@@ -206,7 +206,7 @@ func (c *Clients) HelmInstall(config *Config, values map[string]interface{}, cha
 	if err != nil {
 		return genericError("Helm install", err)
 	}
-	fmt.Println("Successfully installed release: ", rel.Name)
+	log.Println("Successfully installed release: ", rel.Name)
 	return nil
 }
 
@@ -232,7 +232,7 @@ func (c *Clients) HelmUninstall(name string) error {
 
 // HelmStatus check the Status for specified release
 func (c *Clients) HelmStatus(name string) (*HelmStatusData, error) {
-	log.Printf("Checking release Status %s", name)
+	log.Printf("Checking release status %s", name)
 	h := &HelmStatusData{}
 	client := action.NewStatus(c.HelmClient)
 	res, err := client.Run(name)

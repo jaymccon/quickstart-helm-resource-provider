@@ -16,7 +16,6 @@ type Stage string
 
 const (
 	InitStage        Stage = "Init"
-	LambdaInitStage  Stage = "LambdaInit"
 	ReleaseStabilize Stage = "ReleaseStabilize"
 	UninstallRelease Stage = "UninstallRelease"
 	LambdaStabilize  Stage = "LambdaStabilize"
@@ -53,6 +52,7 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
+		return makeEvent(currentModel, InitStage, nil)
 	}
 	if !IsZero(currentModel.VPCConfiguration) {
 		vpc = true

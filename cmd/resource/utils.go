@@ -292,7 +292,6 @@ func downloadHTTP(url string, filepath string) error {
 	if err != nil {
 		return genericError("Downloading file", err)
 	}
-	log.Println(resp.StatusCode)
 	if resp.StatusCode != 200 {
 		return genericError("Downloading file", fmt.Errorf("Got response %v", resp.StatusCode))
 	}
