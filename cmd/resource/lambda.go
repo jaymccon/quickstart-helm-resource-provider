@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -23,6 +24,7 @@ const (
 	MemorySize         int64  = 256
 	Runtime            string = "go1.x"
 	Timeout            int64  = 900
+	UpdateInProgress   string = "The function could not be updated due to a concurrent update operation."
 )
 
 type Event struct {
@@ -157,8 +159,31 @@ func updateFunction(svc LambdaAPI, l *lambdaResource) error {
 			SubnetIds:        aws.StringSlice(l.vpcConfig.SubnetIds),
 		},
 	}
+	if !needsUpdate(configInput, l.functionOutput.Configuration) {
+		return AWSError(nil)
+	}
 	_, err = svc.UpdateFunctionConfiguration(configInput)
+	if err != nil {
+		if strings.Contains(err.Error(), UpdateInProgress) {
+			time.Sleep(5 * time.Second)
+			return updateFunction(svc, l)
+		}
+	}
 	return AWSError(err)
+}
+
+func needsUpdate(desired *lambda.UpdateFunctionConfigurationInput, current *lambda.FunctionConfiguration) bool {
+	if *desired.FunctionName == *current.FunctionName &&
+		*desired.Handler == *current.Handler &&
+		*desired.MemorySize == *current.MemorySize &&
+		*desired.Role == *current.Role &&
+		*desired.Runtime == *current.Runtime &&
+		*desired.Timeout == *current.Timeout &&
+		roughlyEqual(desired.VpcConfig.SecurityGroupIds, current.VpcConfig.SecurityGroupIds) &&
+		roughlyEqual(desired.VpcConfig.SubnetIds, current.VpcConfig.SubnetIds) {
+		return false
+	}
+	return true
 }
 
 func checklambdaState(svc LambdaAPI, functionName *string) (State, error) {
