@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/aws-quickstart/quickstart-helm-resource-provider/cmd/resource"
@@ -11,12 +12,17 @@ import (
 
 func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaResponse, error) {
 	defer resource.LogPanic()
+
 	res := &resource.LambdaResponse{}
+	eJson, err := json.Marshal(e)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(string(eJson))
 	data, err := resource.DecodeID(e.Model.ID)
 	if err != nil {
 		return nil, err
 	}
-
 	client, err := resource.NewClients(nil, nil, aws.String(data.Namespace), nil, nil, e.Kubeconfig)
 
 	switch e.Action {
