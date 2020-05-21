@@ -486,3 +486,44 @@ func isZero(v reflect.Value) bool {
 func IsZero(v interface{}) bool {
 	return isZero(reflect.ValueOf(v))
 }
+
+func roughlyEqual(a []*string, b []*string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	for _, i := range a {
+		matched := false
+		for _, ii := range b {
+			if i == nil && ii == nil {
+				matched = true
+				break
+			}
+			if i == nil || ii == nil {
+				continue
+			}
+			if *ii == *i {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	for _, i := range b {
+		matched := false
+		for _, ii := range a {
+			if *ii == *i {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}

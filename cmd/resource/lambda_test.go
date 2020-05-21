@@ -28,44 +28,51 @@ func (m *mockLambdaClient) DeleteFunction(i *lambda.DeleteFunctionInput) (*lambd
 	return nil, awserr.New(lambda.ErrCodeResourceNotFoundException, "NotFound", fmt.Errorf("NotFound"))
 }
 
+func getFunctionConfig() *lambda.FunctionConfiguration {
+	return &lambda.FunctionConfiguration{
+		CodeSha256:   aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
+		State:        aws.String("Active"),
+		FunctionName: aws.String("t-name"),
+		Handler:      aws.String(Handler),
+		MemorySize:   aws.Int64(MemorySize),
+		Role:         aws.String("t-role-arn"),
+		Runtime:      aws.String(Runtime),
+		Timeout:      aws.Int64(Timeout),
+		VpcConfig: &lambda.VpcConfigResponse{
+			SecurityGroupIds: aws.StringSlice([]string{"sg-a", "sg-b"}),
+			SubnetIds:        aws.StringSlice([]string{"subnet-a", "subnet-b"}),
+		},
+	}
+}
+
 func (m *mockLambdaClient) GetFunction(i *lambda.GetFunctionInput) (*lambda.GetFunctionOutput, error) {
 	if aws.StringValue(i.FunctionName) == "function1" {
 		return &lambda.GetFunctionOutput{
-			Configuration: &lambda.FunctionConfiguration{
-				State:      aws.String("Active"),
-				CodeSha256: aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
-			},
+			Configuration: getFunctionConfig(),
 		}, nil
 	}
 	if aws.StringValue(i.FunctionName) == "function2" {
+		config := getFunctionConfig()
+		config.State = aws.String("Failed")
 		return &lambda.GetFunctionOutput{
-			Configuration: &lambda.FunctionConfiguration{
-				State: aws.String("Failed"),
-			},
+			Configuration: config,
 		}, nil
 	}
 	if aws.StringValue(i.FunctionName) == "function3" {
 		return &lambda.GetFunctionOutput{
-			Configuration: &lambda.FunctionConfiguration{
-				State:      aws.String("Active"),
-				CodeSha256: aws.String("xf/I8HjgfTQqqww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
-			},
+			Configuration: getFunctionConfig(),
 		}, nil
 	}
 	if aws.StringValue(i.FunctionName) == "helm-provider-vpc-connector-0458f313f181167f7e501510610dcbd4" {
 		return &lambda.GetFunctionOutput{
-			Configuration: &lambda.FunctionConfiguration{
-				State:      aws.String("Active"),
-				CodeSha256: aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
-			},
+			Configuration: getFunctionConfig(),
 		}, nil
 	}
 	if aws.StringValue(i.FunctionName) == "helm-provider-vpc-connector-38919e8bbd92924c6d275cf1409ff027" {
+		config := getFunctionConfig()
+		config.State = aws.String("Pending")
 		return &lambda.GetFunctionOutput{
-			Configuration: &lambda.FunctionConfiguration{
-				State:      aws.String("Pending"),
-				CodeSha256: aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
-			},
+			Configuration: config,
 		}, nil
 	}
 	return nil, awserr.New(lambda.ErrCodeResourceNotFoundException, "NotFound", fmt.Errorf("NotFound"))
@@ -163,10 +170,7 @@ func TestGetFunction(t *testing.T) {
 		"Correct": {
 			name: aws.String("function1"),
 			eRes: &lambda.GetFunctionOutput{
-				Configuration: &lambda.FunctionConfiguration{
-					CodeSha256: aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
-					State:      aws.String("Active"),
-				},
+				Configuration: getFunctionConfig(),
 			},
 		},
 		"NoExt": {
@@ -363,4 +367,37 @@ func TestNewLambdaResource(t *testing.T) {
 			assert.EqualValues(t, d.elambdaResource, result)
 		})
 	}
+}
+
+func TestNeedsUpdate(t *testing.T) {
+	desired := &lambda.UpdateFunctionConfigurationInput{
+		FunctionName: aws.String("t-name"),
+		Handler:      aws.String(Handler),
+		MemorySize:   aws.Int64(MemorySize),
+		Role:         aws.String("t-role-arn"),
+		Runtime:      aws.String(Runtime),
+		Timeout:      aws.Int64(Timeout),
+		VpcConfig: &lambda.VpcConfig{
+			SecurityGroupIds: aws.StringSlice([]string{"sg-a", "sg-b"}),
+			SubnetIds:        aws.StringSlice([]string{"subnet-a", "subnet-b"}),
+		},
+	}
+	current := &lambda.FunctionConfiguration{
+		FunctionName: aws.String("t-name"),
+		Handler:      aws.String(Handler),
+		MemorySize:   aws.Int64(MemorySize),
+		Role:         aws.String("t-role-arn"),
+		Runtime:      aws.String(Runtime),
+		Timeout:      aws.Int64(Timeout),
+		VpcConfig: &lambda.VpcConfigResponse{
+			SecurityGroupIds: aws.StringSlice([]string{"sg-a", "sg-b"}),
+			SubnetIds:        aws.StringSlice([]string{"subnet-a", "subnet-b"}),
+		},
+	}
+	assert.False(t, needsUpdate(desired, current))
+	current.VpcConfig.SecurityGroupIds = aws.StringSlice([]string{"sg-a", "sg-b", "sg-c"})
+	assert.True(t, needsUpdate(desired, current))
+	current.VpcConfig.SecurityGroupIds = aws.StringSlice([]string{"sg-a", "sg-b"})
+	current.MemorySize = aws.Int64(99999)
+	assert.True(t, needsUpdate(desired, current))
 }
