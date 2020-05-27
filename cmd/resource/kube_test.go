@@ -1,6 +1,11 @@
 package resource
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/extensions/v1beta1"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"os"
 	"testing"
 
@@ -48,7 +53,7 @@ func TestCreateKubeConfig(t *testing.T) {
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := createKubeConfig(mockEKSSvc, mockSTSSvc, mockSMSvc, d.cluster, d.kubeconfig, d.role, d.customKubeconfig)
+			err := createKubeConfig(mockEKSSvc, mockSTSSvc, mockSMSvc, d.cluster, d.kubeconfig, d.customKubeconfig)
 			if err != nil {
 				assert.Contains(t, err.Error(), d.expectedErr)
 			} else {
@@ -60,7 +65,7 @@ func TestCreateKubeConfig(t *testing.T) {
 
 // TestCreateNamespace to test createNamespace
 func TestCreateNamespace(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	err := c.createNamespace("test")
 	assert.NoError(t, err)
 }
@@ -68,7 +73,7 @@ func TestCreateNamespace(t *testing.T) {
 // TestCheckPendingResources to test CheckPendingResources
 func TestCheckPendingResources(t *testing.T) {
 	defer os.Remove(TempManifest)
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	rd := &ReleaseData{
 		Name:      "test",
 		Namespace: "default",
@@ -99,22 +104,67 @@ func TestCheckPendingResources(t *testing.T) {
 // TestGetKubeResources to test GetKubeResources
 func TestGetKubeResources(t *testing.T) {
 	defer os.Remove(TempManifest)
-	c := NewMockClient(t)
-	expectedMap := map[string]interface{}{"Deployment": map[string]interface{}{"nginx-deployment": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"AvailableReplicas": "0", "ReadyReplicas": "2", "Replicas": "0"}}, "nginx-ds": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"NumberAvailable": "1", "NumberReady": "1", "NumberUnavailable": "0"}}}, "Service": map[string]interface{}{"lb-service": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Spec": map[string]interface{}{"ClusterIP": "", "Type": "LoadBalancer"}, "Status": map[string]interface{}{"LoadBalancer": map[string]interface{}{"Ingress": map[string]interface{}{"Hostname": "elb.test.com"}}}}, "my-service": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Spec": map[string]interface{}{"Type": ""}}}, "StatefulSet": map[string]interface{}{"nginx-ss": map[string]interface{}{"ObjectMeta": map[string]interface{}{"Namespace": "default"}, "Status": map[string]interface{}{"ReadyReplicas": "2", "Replicas": "0", "UpdatedReplicas": "0"}}}}
+	c := NewMockClient(t, nil)
+	manifest := `---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: nginx-deployment
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+ name: my-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+ name: lb-service
+ spec:
+  type: LoadBalancer`
+	expectedMap := map[string]interface{}{
+		"Deployment": map[string]interface{}{
+			"nginx-deployment": map[string]interface{}{
+				"Namespace": "default", "Spec": interface{}(nil), "Status": map[string]interface{}{
+					"ReadyReplicas": "1",
+				},
+			},
+		}, "Service": map[string]interface{}{
+			"lb-service": map[string]interface{}{
+				"Namespace": "default", "Spec": map[string]interface{}{
+					"ClusterIP": "127.0.0.1", "Type": "LoadBalancer",
+				}, "Status": map[string]interface{}{
+					"LoadBalancer": map[string]interface{}{
+						"Ingress": []interface{}{
+							map[string]interface{}{
+								"Hostname": "elb.test.com",
+							},
+						},
+					},
+				},
+			}, "my-service": map[string]interface{}{
+				"Namespace": "default", "Spec": map[string]interface{}{
+					"ClusterIP": "127.0.0.1", "Type": "ClusterIP",
+				}, "Status": interface{}(nil),
+			},
+		},
+	}
 	rd := &ReleaseData{
 		Name:      "test",
 		Namespace: "default",
-		Manifest:  TestManifest,
+		Manifest:  manifest,
 	}
 	result, err := c.GetKubeResources(rd)
 	assert.Nil(t, err)
-	assert.ObjectsAreEqualValues(expectedMap, result)
+	assert.EqualValues(t, expectedMap, result)
 }
 
 // TestGetManifestDetails to test getManifestDetails
 func TestGetManifestDetails(t *testing.T) {
 	defer os.Remove(TempManifest)
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	rd := &ReleaseData{
 		Name:      "test",
 		Namespace: "default",
@@ -122,4 +172,151 @@ func TestGetManifestDetails(t *testing.T) {
 	}
 	_, err := c.getManifestDetails(rd)
 	assert.Nil(t, err)
+}
+
+// TestReady to test ingressReady, volumeReady and deploymentReady
+func TestReady(t *testing.T) {
+	tests := map[string]struct {
+		assertion assert.BoolAssertionFunc
+		ing       *v1beta1.Ingress
+		pvc       *corev1.PersistentVolumeClaim
+		dep       *appsv1.Deployment
+	}{
+		"Pending": {
+			assertion: assert.False,
+			ing:       ing("test-ingress", "default", true),
+			pvc:       vol("test-pvc", "default", true),
+			dep:       dep("test-dep", "default", true),
+		},
+		"NoPending": {
+			assertion: assert.True,
+			ing:       ing("test-ingress", "default", false),
+			pvc:       vol("test-pvc", "default", false),
+			dep:       dep("test-dep", "default", false),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := ingressReady(d.ing)
+			d.assertion(t, result)
+			result = volumeReady(d.pvc)
+			d.assertion(t, result)
+			result = deploymentReady(d.dep)
+			d.assertion(t, result)
+		})
+	}
+}
+
+// TestDaemonSetReadyReady to test daemonSetReady
+func TestDaemonSetReadyReady(t *testing.T) {
+	tests := map[string]struct {
+		assertion assert.BoolAssertionFunc
+		ds        *appsv1.DaemonSet
+	}{
+		"Pending": {
+			assertion: assert.False,
+			ds:        ds("test-ingress", "default", appsv1.RollingUpdateDaemonSetStrategyType, true),
+		},
+		"NoPending": {
+			assertion: assert.True,
+			ds:        ds("test-ingress", "default", appsv1.RollingUpdateDaemonSetStrategyType, false),
+		},
+		"OnDeleteStrategy": {
+			assertion: assert.True,
+			ds:        ds("test-ingress", "default", appsv1.OnDeleteDaemonSetStrategyType, false),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := daemonSetReady(d.ds)
+			d.assertion(t, result)
+		})
+	}
+}
+
+// TestStatefulSetReady to test statefulSetReady
+func TestStatefulSetReady(t *testing.T) {
+	tests := map[string]struct {
+		assertion assert.BoolAssertionFunc
+		ss        *appsv1.StatefulSet
+	}{
+		"Pending": {
+			assertion: assert.False,
+			ss:        ss("test-ingress", "default", appsv1.RollingUpdateStatefulSetStrategyType, true),
+		},
+		"NoPending": {
+			assertion: assert.True,
+			ss:        ss("test-ingress", "default", appsv1.RollingUpdateStatefulSetStrategyType, false),
+		},
+		"OnDeleteStrategy": {
+			assertion: assert.True,
+			ss:        ss("test-ingress", "default", appsv1.OnDeleteStatefulSetStrategyType, false),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := statefulSetReady(d.ss)
+			d.assertion(t, result)
+		})
+	}
+}
+
+func TestCrdReady(t *testing.T) {
+	tests := map[string]struct {
+		assertion assert.BoolAssertionFunc
+		crd       *apiextv1.CustomResourceDefinition
+	}{
+		"Pending": {
+			assertion: assert.False,
+			crd:       crd("test-crd", "default", false, true),
+		},
+		"NoPending": {
+			assertion: assert.True,
+			crd:       crd("test-crd", "default", false, false),
+		},
+		"PendingWithNames": {
+			assertion: assert.False,
+			crd:       crd("test-crd", "default", true, true),
+		},
+		"NoPendingWithNames": {
+			assertion: assert.True,
+			crd:       crd("test-crd", "default", true, false),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := crdReady(d.crd)
+			d.assertion(t, result)
+		})
+	}
+}
+
+func TestCrdBetaReady(t *testing.T) {
+	tests := map[string]struct {
+		assertion assert.BoolAssertionFunc
+		crd       *apiextv1beta1.CustomResourceDefinition
+	}{
+		"Pending": {
+			assertion: assert.False,
+			crd:       crdBeta("test-crd", "default", false, true),
+		},
+		"NoPending": {
+			assertion: assert.True,
+			crd:       crdBeta("test-crd", "default", false, false),
+		},
+		"PendingWithNames": {
+			assertion: assert.False,
+			crd:       crdBeta("test-crd", "default", true, true),
+		},
+		"NoPendingWithNames": {
+			assertion: assert.True,
+			crd:       crdBeta("test-crd", "default", true, false),
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := crdBetaReady(d.crd)
+			d.assertion(t, result)
+		})
+	}
 }

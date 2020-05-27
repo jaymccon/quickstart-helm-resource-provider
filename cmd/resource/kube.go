@@ -2,20 +2,25 @@ package resource
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"reflect"
 
-	"helm.sh/helm/v3/pkg/strvals"
+	"helm.sh/helm/v3/pkg/kube"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	v1beta1 "k8s.io/api/extensions/v1beta1"
+	appsv1beta1 "k8s.io/api/apps/v1beta1"
+	appsv1beta2 "k8s.io/api/apps/v1beta2"
+	corev1 "k8s.io/api/core/v1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd/api"
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
 )
@@ -24,6 +29,12 @@ const (
 	KubeConfigLocalPath = "/tmp/kubeConfig"
 	TempManifest        = "/tmp/manifest.yaml"
 	chunkSize           = 500
+	ResourceOutputSize  = 12288 // Set 12 KB as resources output limit
+)
+
+var (
+	ResourceOutputIgnoredTypes = []string{"*v1.ConfigMap", "*v1.Secret"}
+	ResourceOutputIncludedSpec = []string{"*v1.Service"}
 )
 
 type ReleaseData struct {
@@ -31,7 +42,7 @@ type ReleaseData struct {
 }
 
 // createKubeConfig create kubeconfig from ClusterID or Secret manager.
-func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluster *string, kubeconfig *string, role *string, customKubeconfig []byte) error {
+func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluster *string, kubeconfig *string, customKubeconfig []byte) error {
 	switch {
 	case cluster != nil && kubeconfig != nil:
 		return errors.New("Both ClusterID or KubeConfig can not be specified")
@@ -89,9 +100,8 @@ func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluste
 
 // createNamespace create NS if not exists
 func (c *Clients) createNamespace(namespace string) error {
-	nsSpec := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+	nsSpec := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 	_, err := c.ClientSet.CoreV1().Namespaces().Create(context.Background(), nsSpec, metav1.CreateOptions{})
-	log.Println(err)
 	switch err {
 	case nil:
 		return nil
@@ -109,69 +119,100 @@ func (c *Clients) createNamespace(namespace string) error {
 // CheckPendingResources checks pending resources in for the specific release.
 func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 	log.Printf("Checking pending resources in %s", r.Name)
+	var err error
+	var errCount int
+	var pArray []bool
 	if r.Manifest == "" {
 		return true, errors.New("Manifest not provided in the request")
 	}
-	pending := false
 	infos, err := c.getManifestDetails(r)
 	if err != nil {
 		return true, err
 	}
 	for _, info := range infos {
-		kind := info.Object.GetObjectKind().GroupVersionKind().GroupKind().Kind
-		data, err := json.Marshal(info.Object)
-		if err != nil {
-			return true, err
+		if errCount >= lambdaStableTryCount*2 {
+			return true, fmt.Errorf("couldn't get the resources")
 		}
+		switch value := kube.AsVersioned(info).(type) {
+		case *appsv1.Deployment, *appsv1beta1.Deployment, *appsv1beta2.Deployment, *extensionsv1beta1.Deployment:
+			currentDeployment, err := c.ClientSet.AppsV1().Deployments(info.Namespace).Get(context.Background(), info.Name, metav1.GetOptions{})
+			if err != nil {
+				errCount++
+				log.Printf("Warning: Got error getting deployment %s", err.Error())
+				continue
+			}
+			// If paused deployment will never be ready
+			if currentDeployment.Spec.Paused {
+				continue
+			}
+			if !deploymentReady(currentDeployment) {
+				pArray = append(pArray, false)
+			}
+		case *corev1.PersistentVolumeClaim:
+			if !volumeReady(value) {
+				pArray = append(pArray, false)
+			}
+		case *corev1.Service:
+			if !serviceReady(value) {
+				pArray = append(pArray, false)
+			}
+		case *extensionsv1beta1.DaemonSet, *appsv1.DaemonSet, *appsv1beta2.DaemonSet:
+			ds, err := c.ClientSet.AppsV1().DaemonSets(info.Namespace).Get(context.Background(), info.Name, metav1.GetOptions{})
 
-		switch kind {
-		case "Service":
-			var svc v1.Service
-			if err := json.Unmarshal(data, &svc); err != nil {
-				return true, err
+			if err != nil {
+				log.Printf("Warning: Got error getting daemonset %s", err.Error())
+				errCount++
+				continue
 			}
-			switch svc.Spec.Type {
-			case "LoadBalancer":
-				if reflect.ValueOf(svc.Status.LoadBalancer.Ingress).Len() <= 0 {
-					pending = true
-				}
+			if !daemonSetReady(ds) {
+				pArray = append(pArray, false)
 			}
-		case "Deployment":
-			var d appsv1.Deployment
-			if err := json.Unmarshal(data, &d); err != nil {
-				return true, err
+		case *appsv1.StatefulSet, *appsv1beta1.StatefulSet, *appsv1beta2.StatefulSet:
+			sts, err := c.ClientSet.AppsV1().StatefulSets(info.Namespace).Get(context.Background(), info.Name, metav1.GetOptions{})
+			if err != nil {
+				log.Printf("Warning: Got error getting statefulset %s", err.Error())
+				errCount++
+				continue
 			}
-			if d.Status.ReadyReplicas < *d.Spec.Replicas {
-				pending = true
+			if !statefulSetReady(sts) {
+				pArray = append(pArray, false)
 			}
-		case "DaemonSet":
-			var d appsv1.DaemonSet
-			if err := json.Unmarshal(data, &d); err != nil {
-				return true, err
+		case *extensionsv1beta1.Ingress:
+			if !ingressReady(value) {
+				pArray = append(pArray, false)
 			}
-			if d.Status.NumberUnavailable > 0 {
-				pending = true
+		case *apiextv1beta1.CustomResourceDefinition:
+			if err := info.Get(); err != nil {
+				return false, err
 			}
-
-		case "StatefulSet":
-			var d appsv1.StatefulSet
-			if err := json.Unmarshal(data, &d); err != nil {
-				return true, err
+			crd := &apiextv1beta1.CustomResourceDefinition{}
+			if err := scheme.Scheme.Convert(info.Object, crd, nil); err != nil {
+				log.Printf("Warning: Got error getting CRD %s", err.Error())
+				errCount++
+				continue
 			}
-			if d.Status.ReadyReplicas < *d.Spec.Replicas {
-				pending = true
+			if !crdBetaReady(crd) {
+				pArray = append(pArray, false)
 			}
-		case "Ingress":
-			var i v1beta1.Ingress
-			if err := json.Unmarshal(data, &i); err != nil {
-				return true, err
+		case *apiextv1.CustomResourceDefinition:
+			if err := info.Get(); err != nil {
+				return false, err
 			}
-			if reflect.ValueOf(i.Status.LoadBalancer.Ingress).Len() <= 0 {
-				pending = true
+			crd := &apiextv1.CustomResourceDefinition{}
+			if err := scheme.Scheme.Convert(info.Object, crd, nil); err != nil {
+				log.Printf("Warning: Got error getting CRD %s", err.Error())
+				errCount++
+				continue
+			}
+			if !crdReady(crd) {
+				pArray = append(pArray, false)
 			}
 		}
 	}
-	return pending, nil
+	if len(pArray) > 0 || errCount != 0 {
+		return true, err
+	}
+	return false, err
 }
 
 // GetKubeResources get resources for the specific release.
@@ -180,148 +221,54 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 	if r.Manifest == "" {
 		return nil, errors.New("Manifest not provided in the request")
 	}
-	resources := make(map[string]interface{})
+	resources := map[string]interface{}{}
 	infos, err := c.getManifestDetails(r)
 	if err != nil {
 		return nil, err
 	}
+	namespace := "default"
 	for _, info := range infos {
+		var spec interface{}
 		kind := info.Object.GetObjectKind().GroupVersionKind().GroupKind().Kind
-		data, err := json.Marshal(info.Object)
-		if err != nil {
-			return nil, err
+		v := kube.AsVersioned(info)
+		if checkSize(resources, ResourceOutputSize) {
+			break
 		}
-		switch kind {
-		case "Service":
-			var svc v1.Service
-			if err := json.Unmarshal(data, &svc); err != nil {
-				return nil, err
-			}
-			namespace := svc.ObjectMeta.Namespace
-			if svc.ObjectMeta.Namespace == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.ObjectMeta.Namespace=%s", svc.Name, namespace), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Spec.Type=%s", svc.Name, svc.Spec.Type), resources); err != nil {
-				return nil, err
-			}
-			switch svc.Spec.Type {
-			case "LoadBalancer":
-				if reflect.ValueOf(svc.Status.LoadBalancer.Ingress).Len() > 0 {
-					if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Status.LoadBalancer.Ingress.Hostname=%s", svc.Name, svc.Status.LoadBalancer.Ingress[0].Hostname), resources); err != nil {
-						return nil, err
-					}
-				}
-				if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Spec.ClusterIP=%s", svc.Name, svc.Spec.ClusterIP), resources); err != nil {
-					return nil, err
-				}
-			case "ClusterIP":
-				if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Spec.ClusterIP=%s", svc.Name, svc.Spec.ClusterIP), resources); err != nil {
-					return nil, err
-				}
 
-			case "ExternalName":
-				if err := strvals.ParseIntoString(fmt.Sprintf("Service.%s.Spec.ExternalName=%s", svc.Name, svc.Spec.ExternalName), resources); err != nil {
-					return nil, err
-				}
-			}
-		case "Deployment":
-			var d appsv1.Deployment
-			if err := json.Unmarshal(data, &d); err != nil {
-				return nil, err
-			}
-
-			namespace := d.ObjectMeta.Namespace
-			if d.ObjectMeta.Namespace == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.Replicas=%d", d.ObjectMeta.Name, d.Status.Replicas), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.ReadyReplicas=%d", d.ObjectMeta.Name, d.Status.ReadyReplicas), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Deployment.%s.Status.AvailableReplicas=%d", d.ObjectMeta.Name, d.Status.AvailableReplicas), resources); err != nil {
-				return nil, err
-			}
-		case "DaemonSet":
-			var d appsv1.DaemonSet
-			if err := json.Unmarshal(data, &d); err != nil {
-				return nil, err
-			}
-			namespace := d.ObjectMeta.Namespace
-			if d.ObjectMeta.Namespace == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberReady=%d", d.ObjectMeta.Name, d.Status.NumberReady), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberAvailable=%d", d.ObjectMeta.Name, d.Status.NumberAvailable), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("DaemonSet.%s.Status.NumberUnavailable=%d", d.ObjectMeta.Name, d.Status.NumberUnavailable), resources); err != nil {
-				return nil, err
-			}
-		case "StatefulSet":
-			var d appsv1.StatefulSet
-			if err := json.Unmarshal(data, &d); err != nil {
-				return nil, err
-			}
-			namespace := d.ObjectMeta.Namespace
-			if d.ObjectMeta.Namespace == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.ObjectMeta.Namespace=%s", d.ObjectMeta.Name, namespace), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.Status.Replicas=%d", d.ObjectMeta.Name, d.Status.Replicas), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.Status.ReadyReplicas=%d", d.ObjectMeta.Name, d.Status.ReadyReplicas), resources); err != nil {
-				return nil, err
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("StatefulSet.%s.Status.UpdatedReplicas=%d", d.ObjectMeta.Name, d.Status.UpdatedReplicas), resources); err != nil {
-				return nil, err
-			}
-		case "Ingress":
-			var i v1beta1.Ingress
-			if err := json.Unmarshal(data, &i); err != nil {
-				return nil, err
-			}
-			namespace := i.ObjectMeta.Namespace
-			if i.ObjectMeta.Namespace == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("Ingresses.%s.ObjectMeta.Namespace=%s", i.Name, namespace), resources); err != nil {
-				return nil, err
-			}
-			if reflect.ValueOf(i.Status.LoadBalancer.Ingress).Len() > 0 {
-				if err := strvals.ParseIntoString(fmt.Sprintf("Ingresses.%s.Status.LoadBalancer.Ingress.Hostname=%s", i.Name, i.Status.LoadBalancer.Ingress[0].Hostname), resources); err != nil {
-					return nil, err
-				}
-			}
-		default:
-			var dat map[string]interface{}
-			if err := json.Unmarshal(data, &dat); err != nil {
-				return nil, err
-			}
-			metadata := dat["metadata"].(map[string]interface{})
-			namespace := metadata["namespace"]
-			if metadata["namespace"] == "" {
-				namespace = "default"
-			}
-			if err := strvals.ParseIntoString(fmt.Sprintf("%s.%s.ObjectMeta.Namespace=%s", kind, metadata["name"], namespace), resources); err != nil {
-				return nil, err
+		if stringInSlice(reflect.TypeOf(v).String(), ResourceOutputIgnoredTypes) {
+			continue
+		}
+		inner := make(map[string]interface{})
+		name, ok := ScanFromStruct(v, "ObjectMeta.Name")
+		if !ok {
+			continue
+		}
+		ns, ok := ScanFromStruct(v, "ObjectMeta.Namespace")
+		if ok {
+			namespace = fmt.Sprint(ns)
+		}
+		if stringInSlice(reflect.TypeOf(v).String(), ResourceOutputIncludedSpec) {
+			spec, ok = ScanFromStruct(v, "Spec")
+			if ok {
+				spec = structToMap(spec)
 			}
 		}
+		status, ok := ScanFromStruct(v, "Status")
+		if ok {
+			status = structToMap(status)
+		}
+		inner = map[string]interface{}{
+			fmt.Sprint(name): map[string]interface{}{
+				"Namespace": namespace,
+				"Spec":      spec,
+				"Status":    status,
+			},
+		}
+		if IsZero(resources[kind]) {
+			resources[kind] = map[string]interface{}{}
+		}
+		temp := resources[kind].(map[string]interface{})
+		resources[kind] = mergeMaps(temp, inner)
 	}
 	return resources, nil
 }
@@ -354,4 +301,159 @@ func (c *Clients) getManifestDetails(r *ReleaseData) ([]*resource.Info, error) {
 		return nil, err
 	}
 	return infos, nil
+}
+
+func ingressReady(i *extensionsv1beta1.Ingress) bool {
+	if i.Status.LoadBalancer.Ingress == nil {
+		log.Printf("Ingress does not have address: %s/%s", i.GetNamespace(), i.GetName())
+		return false
+	}
+	return true
+}
+
+func volumeReady(v *corev1.PersistentVolumeClaim) bool {
+	if v.Status.Phase != corev1.ClaimBound {
+		log.Printf("PersistentVolumeClaim is not bound: %s/%s", v.GetNamespace(), v.GetName())
+		return false
+	}
+	return true
+}
+
+func serviceReady(s *corev1.Service) bool {
+	// ExternalName Services are external to cluster so helm shouldn't be checking to see if they're 'ready' (i.e. have an IP Set)
+	if s.Spec.Type == corev1.ServiceTypeExternalName {
+		return true
+	}
+
+	// Make sure the service is not explicitly set to "None" before checking the IP
+	if s.Spec.ClusterIP != corev1.ClusterIPNone && s.Spec.ClusterIP == "" {
+		log.Printf("Service does not have cluster IP address: %s/%s", s.GetNamespace(), s.GetName())
+		return false
+	}
+
+	// This checks if the service has a LoadBalancer and that balancer has an Ingress defined
+	if s.Spec.Type == corev1.ServiceTypeLoadBalancer {
+		// do not wait when at least 1 external IP is set
+		if len(s.Spec.ExternalIPs) > 0 {
+			log.Printf("Service %s/%s has external IP addresses (%v), marking as ready", s.GetNamespace(), s.GetName(), s.Spec.ExternalIPs)
+			return true
+		}
+
+		if s.Status.LoadBalancer.Ingress == nil {
+			log.Printf("Service does not have load balancer ingress IP address: %s/%s", s.GetNamespace(), s.GetName())
+			return false
+		}
+	}
+	return true
+}
+
+func deploymentReady(dep *appsv1.Deployment) bool {
+	if !(dep.Status.ReadyReplicas >= *dep.Spec.Replicas) {
+		log.Printf("Deployment is not ready: %s/%s. %d out of %d expected pods are ready", dep.Namespace, dep.Name, dep.Status.ReadyReplicas, *dep.Spec.Replicas)
+		return false
+	}
+	return true
+}
+
+func daemonSetReady(ds *appsv1.DaemonSet) bool {
+	// If the update strategy is not a rolling update, there will be nothing to wait for
+	if ds.Spec.UpdateStrategy.Type != appsv1.RollingUpdateDaemonSetStrategyType {
+		return true
+	}
+
+	// Make sure all the updated pods have been scheduled
+	if ds.Status.UpdatedNumberScheduled != ds.Status.DesiredNumberScheduled {
+		log.Printf("DaemonSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", ds.Namespace, ds.Name, ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled)
+		return false
+	}
+	maxUnavailable, err := intstr.GetValueFromIntOrPercent(ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable, int(ds.Status.DesiredNumberScheduled), true)
+	if err != nil {
+		maxUnavailable = int(ds.Status.DesiredNumberScheduled)
+	}
+
+	expectedReady := int(ds.Status.DesiredNumberScheduled) - maxUnavailable
+	if !(int(ds.Status.NumberReady) >= expectedReady) {
+		log.Printf("DaemonSet is not ready: %s/%s. %d out of %d expected pods are ready", ds.Namespace, ds.Name, ds.Status.NumberReady, expectedReady)
+		return false
+	}
+	return true
+}
+
+func statefulSetReady(sts *appsv1.StatefulSet) bool {
+	// If the update strategy is not a rolling update, there will be nothing to wait for
+	if sts.Spec.UpdateStrategy.Type != appsv1.RollingUpdateStatefulSetStrategyType {
+		return true
+	}
+
+	// Dereference all the pointers because StatefulSets like them
+	var partition int
+	// 1 is the default for replicas if not set
+	var replicas = 1
+	// For some reason, even if the update strategy is a rolling update, the
+	// actual rollingUpdate field can be nil. If it is, we can safely assume
+	// there is no partition value
+	if sts.Spec.UpdateStrategy.RollingUpdate != nil && sts.Spec.UpdateStrategy.RollingUpdate.Partition != nil {
+		partition = int(*sts.Spec.UpdateStrategy.RollingUpdate.Partition)
+	}
+	if sts.Spec.Replicas != nil {
+		replicas = int(*sts.Spec.Replicas)
+	}
+
+	// Because an update strategy can use partitioning, we need to calculate the
+	// number of updated replicas we should have. For example, if the replicas
+	// is set to 3 and the partition is 2, we'd expect only one pod to be
+	// updated
+	expectedReplicas := replicas - partition
+
+	// Make sure all the updated pods have been scheduled
+	if int(sts.Status.UpdatedReplicas) != expectedReplicas {
+		log.Printf("StatefulSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", sts.Namespace, sts.Name, sts.Status.UpdatedReplicas, expectedReplicas)
+		return false
+	}
+
+	if int(sts.Status.ReadyReplicas) != replicas {
+		log.Printf("StatefulSet is not ready: %s/%s. %d out of %d expected pods are ready", sts.Namespace, sts.Name, sts.Status.ReadyReplicas, replicas)
+		return false
+	}
+	return true
+}
+
+func crdBetaReady(crd *apiextv1beta1.CustomResourceDefinition) bool {
+	for _, cond := range crd.Status.Conditions {
+		switch cond.Type {
+		case apiextv1beta1.Established:
+			if cond.Status == apiextv1beta1.ConditionTrue {
+				return true
+			}
+		case apiextv1beta1.NamesAccepted:
+			if cond.Status == apiextv1beta1.ConditionFalse {
+				// This indicates a naming conflict, but it's probably not the
+				// job of this function to fail because of that. Instead,
+				// we treat it as a success, since the process should be able to
+				// continue.
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func crdReady(crd *apiextv1.CustomResourceDefinition) bool {
+	for _, cond := range crd.Status.Conditions {
+		switch cond.Type {
+		case apiextv1.Established:
+			if cond.Status == apiextv1.ConditionTrue {
+				return true
+			}
+		case apiextv1.NamesAccepted:
+			if cond.Status == apiextv1.ConditionFalse {
+				// This indicates a naming conflict, but it's probably not the
+				// job of this function to fail because of that. Instead,
+				// we treat it as a success, since the process should be able to
+				// continue.
+				return true
+			}
+		}
+	}
+	return false
 }

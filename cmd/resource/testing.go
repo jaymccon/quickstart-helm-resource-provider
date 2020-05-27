@@ -6,6 +6,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"io"
 	"io/ioutil"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"net/http"
 	"net/http/httptest"
@@ -147,7 +149,7 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ds("nginx-ds", "default", appsv1.RollingUpdateDaemonSetStrategyType, false))}, nil
 						case p == "/namespaces/default/statefulsets/nginx-ss" && m == "GET":
 							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ss("nginx-ss", "default", appsv1.RollingUpdateStatefulSetStrategyType, false))}, nil
-						case p == "/ingress/test-ingress" && m == "GET":
+						case p == "/namespaces/default/ingress/test-ingress" && m == "GET":
 							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ing("test-ingress", "default", false))}, nil
 						default:
 							t.Fatalf("unexpected request: %#v\n%#v", req.URL, req)
@@ -183,6 +185,10 @@ func NewMockClient(t *testing.T, m *Model) *Clients {
 			ds("nginx-ds", "default", appsv1.RollingUpdateDaemonSetStrategyType, false),
 			ss("nginx-ss", "default", appsv1.RollingUpdateStatefulSetStrategyType, false),
 			ing("test-ingress", "default", false),
+			//crd("test-crd", "default", false, false),
+			//crd("test-crd-foo", "default", true, false),
+			//crdBeta("test-crd-beta", "default", false, false),
+			//crdBeta("test-crd-beta-foo", "default", true, false),
 		),
 		HelmClient: h,
 		Settings:   cli.New(),
@@ -291,7 +297,25 @@ func testDynamicResources() []*restmapper.APIGroupResources {
 			},
 			VersionedResources: map[string][]metav1.APIResource{
 				"v1beta1": {
-					{Name: "ingress", Namespaced: false, Kind: "Ingress"},
+					{Name: "ingress", Namespaced: true, Kind: "Ingress"},
+				},
+			},
+		},
+		{
+			Group: metav1.APIGroup{
+				Name: "apiextensions.k8s.io",
+				Versions: []metav1.GroupVersionForDiscovery{
+					{Version: "v1beta1"},
+					{Version: "v1"},
+				},
+				PreferredVersion: metav1.GroupVersionForDiscovery{Version: "v1"},
+			},
+			VersionedResources: map[string][]metav1.APIResource{
+				"v1beta1": {
+					{Name: "customresourcedefinition", Namespaced: true, Kind: "CustomResourceDefinition"},
+				},
+				"v1": {
+					{Name: "customresourcedefinition", Namespaced: true, Kind: "CustomResourceDefinition"},
 				},
 			},
 		},
@@ -543,5 +567,73 @@ func vol(name string, namespace string, pending bool) *corev1.PersistentVolumeCl
 		Status: corev1.PersistentVolumeClaimStatus{
 			Phase: p,
 		},
+	}
+}
+
+func crd(name string, namespace string, namesAccepted bool, pending bool) *apiextv1.CustomResourceDefinition {
+	s := apiextv1.ConditionTrue
+	if pending {
+		s = apiextv1.ConditionFalse
+	}
+	c := []apiextv1.CustomResourceDefinitionCondition{{
+		Type:   apiextv1.Established,
+		Status: s,
+	},
+	}
+	switch {
+	case namesAccepted && !pending:
+		c = []apiextv1.CustomResourceDefinitionCondition{{
+			Type:   apiextv1.NamesAccepted,
+			Status: apiextv1.ConditionFalse,
+		},
+		}
+	case namesAccepted && pending:
+		c = []apiextv1.CustomResourceDefinitionCondition{{
+			Type:   apiextv1.NamesAccepted,
+			Status: apiextv1.ConditionTrue,
+		},
+		}
+	}
+
+	return &apiextv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Status: apiextv1.CustomResourceDefinitionStatus{Conditions: c},
+	}
+}
+
+func crdBeta(name string, namespace string, namesAccepted bool, pending bool) *apiextv1beta1.CustomResourceDefinition {
+	s := apiextv1beta1.ConditionTrue
+	if pending {
+		s = apiextv1beta1.ConditionFalse
+	}
+	c := []apiextv1beta1.CustomResourceDefinitionCondition{{
+		Type:   apiextv1beta1.Established,
+		Status: s,
+	},
+	}
+	switch {
+	case namesAccepted && !pending:
+		c = []apiextv1beta1.CustomResourceDefinitionCondition{{
+			Type:   apiextv1beta1.NamesAccepted,
+			Status: apiextv1beta1.ConditionFalse,
+		},
+		}
+	case namesAccepted && pending:
+		c = []apiextv1beta1.CustomResourceDefinitionCondition{{
+			Type:   apiextv1beta1.NamesAccepted,
+			Status: apiextv1beta1.ConditionTrue,
+		},
+		}
+	}
+
+	return &apiextv1beta1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Status: apiextv1beta1.CustomResourceDefinitionStatus{Conditions: c},
 	}
 }

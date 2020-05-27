@@ -38,10 +38,6 @@ const (
 	defaultTimeOut = 60
 )
 
-var zeroValue reflect.Value
-var interfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
-var stringType = reflect.TypeOf("")
-
 // ID struct for CFN physical resource
 type ID struct {
 	ClusterID  *string `json:",omitempty"`
