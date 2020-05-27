@@ -100,8 +100,8 @@ func TestHandler(t *testing.T) {
 			eError: aws.String("At Json Unmarshal"),
 		},
 	}
-	resource.NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*resource.Clients, error) {
-		return resource.NewMockClient(t), nil
+	resource.NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *resource.VPCConfiguration) (*resource.Clients, error) {
+		return resource.NewMockClient(t, nil), nil
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {

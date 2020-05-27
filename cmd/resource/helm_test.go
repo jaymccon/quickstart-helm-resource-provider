@@ -11,14 +11,14 @@ import (
 	"helm.sh/helm/v3/pkg/repo"
 )
 
-func  TestHelmClientInvoke(t *testing.T) {
-	_, err  := helmClientInvoke(aws.String("default"))
+func TestHelmClientInvoke(t *testing.T) {
+	_, err := helmClientInvoke(aws.String("default"))
 	assert.Nil(t, err)
 }
 
 // TestAddHelmRepoUpdate to test addHelmRepoUpdate
 func TestAddHelmRepoUpdate(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	defer os.Remove(c.Settings.RepositoryConfig)
 	tests := map[string]struct {
 		name        string
@@ -55,7 +55,7 @@ func TestHelmInstall(t *testing.T) {
 	defer os.Remove(chartLocalPath)
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	tests := map[string]struct {
 		m           *Model
 		config      *Config
@@ -115,7 +115,7 @@ func TestHelmInstall(t *testing.T) {
 // TestHelmUninstall to test HelmUninstall
 func TestHelmUninstall(t *testing.T) {
 	expectedErr := "not found"
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	releases := []string{"one", "five"}
 	for _, rel := range releases {
 		t.Run(rel, func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestHelmUninstall(t *testing.T) {
 
 // TestHelmStatus to test HelmStatus
 func TestHelmStatus(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	tests := map[string]struct {
 		name        string
 		eStatus     *HelmStatusData
@@ -165,7 +165,7 @@ func TestHelmStatus(t *testing.T) {
 
 // TestHelmList to test HelmList
 func TestHelmList(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	hl := []HelmListData{}
 	for _, rel := range []string{"one", "two", "three", "five"} {
 		l := HelmListData{ReleaseName: rel, ChartName: "hello", ChartVersion: "0.1.0", Chart: "hello-0.1.0", Namespace: "default"}
@@ -208,7 +208,7 @@ func TestHelmUpgrade(t *testing.T) {
 	defer os.Remove(chartLocalPath)
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	tests := map[string]struct {
 		m           *Model
 		config      *Config

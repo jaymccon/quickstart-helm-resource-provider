@@ -23,7 +23,8 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 	if err != nil {
 		return nil, err
 	}
-	client, err := resource.NewClients(nil, nil, aws.String(data.Namespace), nil, nil, e.Kubeconfig)
+
+	client, err := resource.NewClients(nil, nil, data.Namespace, nil, nil, e.Kubeconfig, nil)
 
 	switch e.Action {
 	case resource.InstallReleaseAction:
@@ -31,7 +32,7 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 		return nil, client.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
 	case resource.CheckReleaseAction:
 		fmt.Println("CheckReleaseAction")
-		res.StatusData, err = client.HelmStatus(data.Name)
+		res.StatusData, err = client.HelmStatus(aws.StringValue(data.Name))
 		return res, err
 	case resource.GetPendingAction:
 		fmt.Println("GetPendingAction")
@@ -43,10 +44,10 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 		return res, err
 	case resource.UpdateReleaseAction:
 		fmt.Println("UpdateReleaseAction")
-		return nil, client.HelmUpgrade(data.Name, e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
+		return nil, client.HelmUpgrade(aws.StringValue(data.Name), e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
 	case resource.UninstallReleaseAction:
 		fmt.Println("UninstallReleaseAction")
-		return nil, client.HelmUninstall(data.Name)
+		return nil, client.HelmUninstall(aws.StringValue(data.Name))
 	case resource.ListReleaseAction:
 		fmt.Println("ListReleaseAction")
 		res.ListData, err = client.HelmList(e.Inputs.Config, e.Inputs.ChartDetails)

@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"io"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,13 +109,7 @@ metadata:
 apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
-  name: test-ingress
-
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: game-demo`
+  name: test-ingress`
 
 var TestPendingManifest = `apiVersion: apps/v1
 kind: Deployment
@@ -130,7 +125,6 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 	header := http.Header{}
 	header.Set("Content-Type", runtime.ContentTypeJSON)
 	codec := scheme.Codecs.LegacyCodec(scheme.Scheme.PrioritizedVersionsAllGroups()...)
-	td := testKubeData()
 	return func() *resource.Builder {
 		return resource.NewFakeBuilder(
 			func(version schema.GroupVersion) (resource.RESTClient, error) {
@@ -140,23 +134,21 @@ func newFakeBuilder(t *testing.T) func() *resource.Builder {
 					Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 						switch p, m := req.URL.Path, req.Method; {
 						case p == "/namespaces/test/services" && m == "POST":
-							return &http.Response{StatusCode: http.StatusCreated, Header: header, Body: ObjBody(codec, td.ns)}, nil
+							return &http.Response{StatusCode: http.StatusCreated, Header: header, Body: ObjBody(codec, ns("test"))}, nil
 						case p == "/namespaces/default/deployments/nginx-deployment" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.dep)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, dep("nginx-deployment", "default", false))}, nil
 						case p == "/namespaces/default/deployments/nginx-deployment-foo" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.pdep)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, dep("nginx-deployment-foo", "default", true))}, nil
 						case p == "/namespaces/default/services/my-service" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.svc)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, svc("my-service", "default", v1.ServiceTypeClusterIP))}, nil
 						case p == "/namespaces/default/services/lb-service" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.lsvc)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, svc("lb-service", "default", v1.ServiceTypeLoadBalancer))}, nil
 						case p == "/namespaces/default/daemonsets/nginx-ds" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ds)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ds("nginx-ds", "default", appsv1.RollingUpdateDaemonSetStrategyType, false))}, nil
 						case p == "/namespaces/default/statefulsets/nginx-ss" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ss)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ss("nginx-ss", "default", appsv1.RollingUpdateStatefulSetStrategyType, false))}, nil
 						case p == "/ingress/test-ingress" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.ing)}, nil
-						case p == "/namespaces/default/configmaps/game-demo" && m == "GET":
-							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, td.cm)}, nil
+							return &http.Response{StatusCode: http.StatusOK, Header: header, Body: ObjBody(codec, ing("test-ingress", "default", false))}, nil
 						default:
 							t.Fatalf("unexpected request: %#v\n%#v", req.URL, req)
 							return nil, nil
@@ -177,17 +169,29 @@ type mockAWSClients struct {
 	AWSClientsIface
 }
 
-func NewMockClient(t *testing.T) *Clients {
+func NewMockClient(t *testing.T, m *Model) *Clients {
 	t.Helper()
 	h := ActionConfigFixture(t)
 	makeMeSomeReleases(h.Releases, t)
-	return &Clients{
+	c := &Clients{
 		ResourceBuilder: newFakeBuilder(t),
-		ClientSet:       fakeclientset.NewSimpleClientset(),
-		HelmClient:      h,
-		Settings:        cli.New(),
-		AWSClients:      &mockAWSClients{AWSSession: MockSession},
+		ClientSet: fakeclientset.NewSimpleClientset(
+			dep("nginx-deployment", "default", false),
+			dep("nginx-deployment-foo", "default", true),
+			svc("my-service", "default", v1.ServiceTypeClusterIP),
+			svc("lb-service", "default", v1.ServiceTypeLoadBalancer),
+			ds("nginx-ds", "default", appsv1.RollingUpdateDaemonSetStrategyType, false),
+			ss("nginx-ss", "default", appsv1.RollingUpdateStatefulSetStrategyType, false),
+			ing("test-ingress", "default", false),
+		),
+		HelmClient: h,
+		Settings:   cli.New(),
 	}
+	c.AWSClients = &mockAWSClients{AWSSession: MockSession}
+	if m != nil {
+		c.LambdaResource = newLambdaResource(c.AWSClients.STSClient(nil, nil), m.ClusterID, m.KubeConfig, m.VPCConfiguration)
+	}
+	return c
 }
 
 func ObjBody(codec runtime.Codec, obj runtime.Object) io.ReadCloser {
@@ -391,58 +395,153 @@ func buildChart(opts ...chartOption) *chart.Chart {
 	return c.Chart
 }
 
-type td struct {
-	ns   *v1.Namespace
-	dep  *appsv1.Deployment
-	pdep *appsv1.Deployment
-	svc  *v1.Service
-	lsvc *v1.Service
-	ds   *appsv1.DaemonSet
-	ss   *appsv1.StatefulSet
-	ing  *v1beta1.Ingress
-	cm *v1.ConfigMap
+func svc(name string, namespace string, sType v1.ServiceType) *v1.Service {
+	var ingress []v1.LoadBalancerIngress
+	if sType == v1.ServiceTypeLoadBalancer {
+		ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "elb.test.com"}}
+	}
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:      sType,
+			ClusterIP: "127.0.0.1",
+		},
+		Status: corev1.ServiceStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: ingress,
+			},
+		},
+	}
 }
 
-func testKubeData() *td {
-	t := &td{}
-	t.ns = &v1.Namespace{}
-	t.ns.Name = "test"
+func dep(name string, namespace string, pending bool) *appsv1.Deployment {
+	count := int32(1)
+	rcount := int32(1)
+	if pending {
+		rcount = int32(0)
+	}
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: aws.Int32(count),
+		},
+		Status: appsv1.DeploymentStatus{
+			ReadyReplicas: rcount,
+		},
+	}
+}
 
-	t.dep = &appsv1.Deployment{}
-	t.dep.Name = "nginx-deployment"
-	t.dep.Status.ReadyReplicas = int32(2)
-	t.dep.Spec.Replicas = aws.Int32(2)
+func ds(name string, namespace string, dtype appsv1.DaemonSetUpdateStrategyType, pending bool) *appsv1.DaemonSet {
+	count := int32(1)
+	rcount := int32(1)
+	dcount := int32(1)
+	ucount := int32(1)
+	if pending {
+		dcount = int32(1)
+		rcount = int32(0)
+		count = int32(1)
+		ucount = int32(0)
+	}
+	updateS := appsv1.DaemonSetUpdateStrategy{Type: dtype}
+	if dtype == appsv1.RollingUpdateDaemonSetStrategyType {
+		maxU := intstr.FromInt(0)
+		updateS = appsv1.DaemonSetUpdateStrategy{Type: dtype,
+			RollingUpdate: &appsv1.RollingUpdateDaemonSet{
+				MaxUnavailable: &maxU,
+			}}
+	}
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: appsv1.DaemonSetSpec{
+			UpdateStrategy: updateS,
+		},
+		Status: appsv1.DaemonSetStatus{
+			DesiredNumberScheduled: dcount,
+			NumberReady:            rcount,
+			NumberAvailable:        count,
+			UpdatedNumberScheduled: ucount,
+		},
+	}
+}
 
-	t.pdep = &appsv1.Deployment{}
-	t.pdep.Name = "nginx-deployment-foo"
-	t.pdep.Status.ReadyReplicas = int32(1)
-	t.pdep.Spec.Replicas = aws.Int32(2)
+func ss(name string, namespace string, dtype appsv1.StatefulSetUpdateStrategyType, pending bool) *appsv1.StatefulSet {
+	count := int32(2)
+	rcount := int32(2)
+	ucount := int32(1)
+	if pending {
+		rcount = int32(0)
+		ucount = int32(1)
+	}
+	updateS := appsv1.StatefulSetUpdateStrategy{Type: dtype}
+	if dtype == appsv1.RollingUpdateStatefulSetStrategyType {
+		updateS = appsv1.StatefulSetUpdateStrategy{Type: dtype,
+			RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{
+				Partition: aws.Int32(1),
+			}}
+	}
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:       aws.Int32(count),
+			UpdateStrategy: updateS,
+		},
+		Status: appsv1.StatefulSetStatus{
+			ReadyReplicas:   rcount,
+			UpdatedReplicas: ucount,
+		},
+	}
+}
 
-	t.svc = &v1.Service{}
-	t.svc.Name = "my-service"
+func ing(name string, namespace string, pending bool) *v1beta1.Ingress {
+	var ingress []v1.LoadBalancerIngress
+	if !pending {
+		ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "ingress.test.com"}}
+	}
+	return &v1beta1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Status: v1beta1.IngressStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: ingress,
+			},
+		},
+	}
+}
 
-	t.lsvc = &v1.Service{}
-	t.lsvc.Name = "lb-service"
-	t.lsvc.Spec.Type = v1.ServiceTypeLoadBalancer
-	t.lsvc.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "elb.test.com"}}
+func ns(name string) *v1.Namespace {
+	return &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+}
 
-	t.ds = &appsv1.DaemonSet{}
-	t.ds.Name = "nginx-ds"
-	t.ds.Status.NumberUnavailable = int32(0)
-	t.ds.Status.NumberReady = int32(1)
-	t.ds.Status.NumberAvailable = int32(1)
-
-	t.ss = &appsv1.StatefulSet{}
-	t.ss.Name = "nginx-ss"
-	t.ss.Status.ReadyReplicas = int32(2)
-	t.ss.Spec.Replicas = aws.Int32(2)
-
-	t.ing = &v1beta1.Ingress{}
-	t.ing.Name = "test-ingress"
-	t.ing.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "ingress.test.com"}}
-
-	t.cm = &v1.ConfigMap{}
-	t.cm.Name = "game-demo"
-
-	return t
+func vol(name string, namespace string, pending bool) *corev1.PersistentVolumeClaim {
+	p := corev1.ClaimBound
+	if pending {
+		p = corev1.ClaimPending
+	}
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: p,
+		},
+	}
 }
