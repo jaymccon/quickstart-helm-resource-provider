@@ -81,7 +81,7 @@ func (c *AWSClients) EC2Client(region *string, role *string) EC2API {
 }
 
 func (c *AWSClients) Session(region *string, role *string) *session.Session {
-	if region != nil {
+	if region != nil || role != nil {
 		return c.AWSSession.Copy(c.Config(region, role))
 	}
 	return c.AWSSession
@@ -127,7 +127,11 @@ func getClusterDetails(svc eksiface.EKSAPI, clusterName string) (*clusterData, e
 
 // generateKubeToken using the aws-iam-auth pkg
 func generateKubeToken(svc STSAPI, clusterID *string) (*string, error) {
-	log.Printf("Generating token for cluster %s", *clusterID)
+	roleArn, err := getCurrentRoleARN(svc)
+	if err != nil {
+		return nil, genericError("Could not get token: ", err)
+	}
+	log.Printf("Generating token for cluster: %s, role: %s", *clusterID, *roleArn)
 	gen, err := token.NewGenerator(false, false)
 	if err != nil {
 		return nil, genericError("Could not get token: ", err)
@@ -226,16 +230,11 @@ func toRoleArn(arn *string) *string {
 	return arn
 }
 
-func getVpcConfig(session *session.Session, model *Model) (*VPCConfiguration, error) {
-
+func getVpcConfig(ekssvc EKSAPI, ec2svc EC2API, model *Model) (*VPCConfiguration, error) {
 	if model.ClusterID == nil || !IsZero(model.VPCConfiguration) {
 		return nil, nil
 	}
-	client, err := NewClients(model.ClusterID, model.KubeConfig, model.Namespace, session, model.RoleArn, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := getClusterDetails(client.AWSClients.EKSClient(nil, nil), *model.ClusterID)
+	resp, err := getClusterDetails(ekssvc, *model.ClusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,11 +242,11 @@ func getVpcConfig(session *session.Session, model *Model) (*VPCConfiguration, er
 		return nil, nil
 	}
 	log.Println("Detected private cluster, adding VPC Configuration...")
-	subnets, err := filterNattedSubnets(client.AWSClients.EC2Client(nil, nil), resp.resourcesVpcConfig.SubnetIds)
+	subnets, err := filterNattedSubnets(ec2svc, resp.resourcesVpcConfig.SubnetIds)
 	if err != nil {
 		return nil, err
 	}
-	if IsZero(subnets){
+	if IsZero(subnets) {
 		return nil, fmt.Errorf("no subnets with NAT Gateway found for the cluster %s, use VPCConfiguration to specify VPC settings", aws.StringValue(model.ClusterID))
 	}
 	log.Printf("Using Subnets: %v, SecurityGroups: %v", aws.StringValueSlice(subnets), aws.StringValueSlice(resp.resourcesVpcConfig.SecurityGroupIds))

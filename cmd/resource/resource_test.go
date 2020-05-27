@@ -56,16 +56,15 @@ func TestCreate(t *testing.T) {
 		Session:           MockSession,
 	}
 
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
-
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			if d.stage != nil {
 				req.CallbackContext = map[string]interface{}{
 					"Stage": aws.StringValue(d.stage),
 				}
+			}
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, d.model), nil
 			}
 			_, err := Create(req, &Model{}, d.model)
 			assert.Nil(t, err)
@@ -101,12 +100,11 @@ func TestRead(t *testing.T) {
 		Session:           MockSession,
 	}
 
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
-
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, d.model), nil
+			}
 			_, err := Read(req, &Model{}, d.model)
 			assert.Nil(t, err)
 		})
@@ -158,16 +156,15 @@ func TestUpdate(t *testing.T) {
 		Session:           MockSession,
 	}
 
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
-
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			if d.stage != nil {
 				req.CallbackContext = map[string]interface{}{
 					"Stage": aws.StringValue(d.stage),
 				}
+			}
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, d.model), nil
 			}
 			_, err := Update(req, &Model{}, d.model)
 			assert.Nil(t, err)
@@ -211,17 +208,15 @@ func TestDelete(t *testing.T) {
 		CallbackContext:   nil,
 		Session:           MockSession,
 	}
-
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
-
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			if d.stage != nil {
 				req.CallbackContext = map[string]interface{}{
 					"Stage": aws.StringValue(d.stage),
 				}
+			}
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, d.model), nil
 			}
 			_, err := Delete(req, &Model{}, d.model)
 			assert.Nil(t, err)

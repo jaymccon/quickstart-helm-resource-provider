@@ -23,15 +23,8 @@ func init() {
 }
 
 // Create handles the Create event from the Cloudformation service.
-func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+func Create(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	var err error
-	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
-		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
-		if err != nil {
-			return makeEvent(currentModel, NoStage, err), nil
-		}
-	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -50,39 +43,27 @@ func Create(req handler.Request, prevModel *Model, currentModel *Model) (handler
 }
 
 // Read handles the Read event from the Cloudformation service.
-func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	var err error
-	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
-		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
-		if err != nil {
-			return makeEvent(currentModel, NoStage, err), nil
-		}
-	}
 	data, err := DecodeID(currentModel.ID)
 	if err != nil {
 		return handler.ProgressEvent{}, err
 	}
-	client, err := NewClients(aws.String(data.ClusterID), aws.String(data.KubeConfig), aws.String(data.Namespace), req.Session, currentModel.RoleArn, nil)
+	client, err := NewClients(data.ClusterID, data.KubeConfig, data.Namespace, req.Session, currentModel.RoleArn, nil, currentModel.VPCConfiguration)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
 	}
-	s, err := client.HelmStatus(data.Name)
-	if err != nil {
-		return makeEvent(currentModel, NoStage, err), nil
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(client.AWSClients.EKSClient(nil, nil), client.AWSClients.EC2Client(nil, nil), currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err), nil
+		}
 	}
-	currentModel.Name = aws.String(data.Name)
-	currentModel.Namespace = aws.String(data.Namespace)
-	currentModel.Chart = aws.String(s.ChartName)
-	currentModel.Version = aws.String(s.ChartVersion)
-	/*e := &Event{}
+	currentModel.Name = data.Name
+	currentModel.Namespace = data.Namespace
+
+	e := &Event{}
 	e.Model = currentModel
-	e.ReleaseData = &ReleaseData{
-		Name:      data.Name,
-		Namespace: s.Namespace,
-		Chart:     s.Chart,
-		Manifest:  s.Manifest,
-	}
-	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
 
 	vpc := false
 	if !IsZero(currentModel.VPCConfiguration) {
@@ -92,7 +73,7 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
-		u, err := client.initializeLambda(l)
+		u, err := client.initializeLambda(client.LambdaResource)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
@@ -100,24 +81,29 @@ func Read(req handler.Request, prevModel *Model, currentModel *Model) (handler.P
 			return makeEvent(currentModel, NoStage, fmt.Errorf("vpc connector didn't stabilize in time")), nil
 		}
 	}
-
-	currentModel.Resources, err = client.kubeResourcesWrapper(&data.Name, e, l.functionName, vpc)
+	s, err := client.helmStatusWrapper(data.Name, e, client.LambdaResource.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
-	}*/
+	}
+	currentModel.Chart = aws.String(s.ChartName)
+	currentModel.Version = aws.String(s.ChartVersion)
+	/* Disable fetching resources create by helm */
+	e.ReleaseData = &ReleaseData{
+		Name:      aws.StringValue(data.Name),
+		Namespace: s.Namespace,
+		Chart:     s.Chart,
+		Manifest:  s.Manifest,
+	}
+	currentModel.Resources, err = client.kubeResourcesWrapper(e, client.LambdaResource.functionName, vpc)
+	if err != nil {
+		return makeEvent(currentModel, NoStage, err), nil
+	}
 	return makeEvent(currentModel, CompleteStage, nil), nil
 }
 
 // Update handles the Update event from the Cloudformation service.
-func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+func Update(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	var err error
-	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
-		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
-		if err != nil {
-			return makeEvent(currentModel, NoStage, err), nil
-		}
-	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize:
@@ -136,15 +122,8 @@ func Update(req handler.Request, prevModel *Model, currentModel *Model) (handler
 }
 
 // Delete handles the Delete event from the Cloudformation service.
-func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+func Delete(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
-	var err error
-	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
-		currentModel.VPCConfiguration, err = getVpcConfig(req.Session, currentModel)
-		if err != nil {
-			return makeEvent(currentModel, NoStage, err), nil
-		}
-	}
 	stage := getStage(req.CallbackContext)
 	switch stage {
 	case InitStage, LambdaStabilize, UninstallRelease, ReleaseStabilize:
@@ -157,7 +136,7 @@ func Delete(req handler.Request, prevModel *Model, currentModel *Model) (handler
 }
 
 // List handles the List event from the Cloudformation service.
-func List(req handler.Request, prevModel *Model, currentModel *Model) (handler.ProgressEvent, error) {
+func List(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	// Add your code here:
 	// * Make API calls (use req.Session)
 	// * Mutate the model

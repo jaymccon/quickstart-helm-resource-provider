@@ -439,13 +439,10 @@ func TestGetVpcConfig(t *testing.T) {
 		},
 	}
 	eErr := "no subnets with NAT Gateway found"
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			//d.m.VPCConfiguration = nil
-			_, err := getVpcConfig(MockSession, d.m)
+			_, err := getVpcConfig(&mockEKSClient{}, &mockEC2Client{}, d.m)
 			if err != nil {
 				assert.Contains(t, err.Error(), eErr)
 			}

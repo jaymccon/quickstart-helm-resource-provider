@@ -90,9 +90,6 @@ func TestInitialize(t *testing.T) {
 		},
 	}
 
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
 	var eRes handler.ProgressEvent
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -101,6 +98,9 @@ func TestInitialize(t *testing.T) {
 				if name == "PendingLambda" {
 					m.VPCConfiguration = vpcPending
 				}
+			}
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, m), nil
 			}
 			m.Name = aws.String(d.name)
 			m.ID, _ = generateID(m, d.name, "eu-west-1", "default")
@@ -170,13 +170,13 @@ func TestCheckReleaseStatus(t *testing.T) {
 		},
 	}
 
-	NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
-		return NewMockClient(t), nil
-	}
 	var eRes handler.ProgressEvent
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			m.VPCConfiguration = nil
+			NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
+				return NewMockClient(t, m), nil
+			}
 			if d.vpc {
 				m.VPCConfiguration = vpc
 				if name == "PendingLambda" {
@@ -204,7 +204,7 @@ func TestLambdaDestroy(t *testing.T) {
 		},
 	}
 	expected := handler.ProgressEvent{OperationStatus: "SUCCESS", HandlerErrorCode: "", Message: "", CallbackContext: map[string]interface{}(nil), CallbackDelaySeconds: 0, ResourceModel: m, ResourceModels: []interface{}(nil), NextToken: ""}
-	c := NewMockClient(t)
+	c := NewMockClient(t, m)
 	result := c.lambdaDestroy(m)
 	assert.EqualValues(t, expected, result)
 
@@ -237,7 +237,7 @@ func TestInitializeLambda(t *testing.T) {
 			assertion: assert.False,
 		},
 	}
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			l.functionName = d.name
@@ -251,7 +251,7 @@ func TestInitializeLambda(t *testing.T) {
 }
 
 func TestHelmStatusWrapper(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: CheckReleaseAction,
 	}
@@ -271,7 +271,7 @@ func TestHelmStatusWrapper(t *testing.T) {
 }
 
 func TestHelmListWrapper(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: CheckReleaseAction,
 		Inputs: &Inputs{
@@ -285,7 +285,6 @@ func TestHelmListWrapper(t *testing.T) {
 		},
 	}
 
-	name := aws.String("one")
 	tests := []bool{true, false}
 	functionName := aws.String("function1")
 	for _, d := range tests {
@@ -294,7 +293,7 @@ func TestHelmListWrapper(t *testing.T) {
 			testName = "WithVPC"
 		}
 		t.Run(testName, func(t *testing.T) {
-			_, err := c.helmListWrapper(name, event, functionName, d)
+			_, err := c.helmListWrapper(event, functionName, d)
 			assert.Nil(t, err)
 		})
 	}
@@ -303,7 +302,7 @@ func TestHelmInstallWrapper(t *testing.T) {
 	defer os.Remove(chartLocalPath)
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: InstallReleaseAction,
 		Inputs: &Inputs{
@@ -332,7 +331,7 @@ func TestHelmInstallWrapper(t *testing.T) {
 func TestHelmUpgradeWrapper(t *testing.T) {
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: UpdateReleaseAction,
 		Inputs: &Inputs{
@@ -360,7 +359,7 @@ func TestHelmUpgradeWrapper(t *testing.T) {
 }
 
 func TestHelmDeleteWrapper(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: UninstallReleaseAction,
 	}
@@ -380,7 +379,7 @@ func TestHelmDeleteWrapper(t *testing.T) {
 }
 
 func TestKubePendingWrapper(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: GetPendingAction,
 		ReleaseData: &ReleaseData{
@@ -389,7 +388,6 @@ func TestKubePendingWrapper(t *testing.T) {
 			Manifest:  TestManifest,
 		},
 	}
-	name := aws.String("one")
 	tests := []bool{true, false}
 	functionName := aws.String("function1")
 	for _, d := range tests {
@@ -398,14 +396,14 @@ func TestKubePendingWrapper(t *testing.T) {
 			testName = "WithVPC"
 		}
 		t.Run(testName, func(t *testing.T) {
-			_, err := c.kubePendingWrapper(name, event, functionName, d)
+			_, err := c.kubePendingWrapper(event, functionName, d)
 			assert.Nil(t, err)
 		})
 	}
 }
 
 func TestKubeResourcesWrapper(t *testing.T) {
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	event := &Event{
 		Action: GetResourcesAction,
 		ReleaseData: &ReleaseData{
@@ -414,7 +412,6 @@ func TestKubeResourcesWrapper(t *testing.T) {
 			Manifest:  TestManifest,
 		},
 	}
-	name := aws.String("one")
 	tests := []bool{true, false}
 	functionName := aws.String("function1")
 	for _, d := range tests {
@@ -423,7 +420,7 @@ func TestKubeResourcesWrapper(t *testing.T) {
 			testName = "WithVPC"
 		}
 		t.Run(testName, func(t *testing.T) {
-			_, err := c.kubeResourcesWrapper(name, event, functionName, d)
+			_, err := c.kubeResourcesWrapper(event, functionName, d)
 			assert.Nil(t, err)
 		})
 	}

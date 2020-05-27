@@ -30,11 +30,16 @@ const (
 func initialize(session *session.Session, currentModel *Model, action Action) handler.ProgressEvent {
 	vpc := false
 	var err error
-	client, err := NewClients(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, session, currentModel.RoleArn, nil)
+	client, err := NewClients(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, session, currentModel.RoleArn, nil, currentModel.VPCConfiguration)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
-	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(client.AWSClients.EKSClient(nil, nil), client.AWSClients.EC2Client(nil, nil), currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err)
+		}
+	}
 	e := &Event{}
 	e.Inputs = new(Inputs)
 	e.Inputs.Config = new(Config)
@@ -60,7 +65,7 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		u, err := client.initializeLambda(l)
+		u, err := client.initializeLambda(client.LambdaResource)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
@@ -78,9 +83,9 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		currentModel.Name = aws.String(data.Name)
+		currentModel.Name = data.Name
 		e.Model = currentModel
-		err = client.helmInstallWrapper(e, l.functionName, vpc)
+		err = client.helmInstallWrapper(e, client.LambdaResource.functionName, vpc)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
@@ -94,18 +99,18 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		err = client.helmUpgradeWrapper(aws.String(data.Name), e, l.functionName, vpc)
+		err = client.helmUpgradeWrapper(data.Name, e, client.LambdaResource.functionName, vpc)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		currentModel.Name = aws.String(data.Name)
+		currentModel.Name = data.Name
 		return makeEvent(currentModel, ReleaseStabilize, nil)
 	case UninstallReleaseAction:
 		data, err := DecodeID(currentModel.ID)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		err = client.helmDeleteWrapper(aws.String(data.Name), e, l.functionName, vpc)
+		err = client.helmDeleteWrapper(data.Name, e, client.LambdaResource.functionName, vpc)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
@@ -117,11 +122,16 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 func checkReleaseStatus(session *session.Session, currentModel *Model, successStage Stage) handler.ProgressEvent {
 	vpc := false
 	var err error
-	client, err := NewClients(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, session, currentModel.RoleArn, nil)
+	client, err := NewClients(currentModel.ClusterID, currentModel.KubeConfig, currentModel.Namespace, session, currentModel.RoleArn, nil, currentModel.VPCConfiguration)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
-	l := newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+	if IsZero(currentModel.VPCConfiguration) && currentModel.ClusterID != nil {
+		currentModel.VPCConfiguration, err = getVpcConfig(client.AWSClients.EKSClient(nil, nil), client.AWSClients.EC2Client(nil, nil), currentModel)
+		if err != nil {
+			return makeEvent(currentModel, NoStage, err)
+		}
+	}
 	e := &Event{}
 	e.Model = currentModel
 	if !IsZero(currentModel.VPCConfiguration) {
@@ -130,7 +140,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
-		u, err := client.initializeLambda(l)
+		u, err := client.initializeLambda(client.LambdaResource)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
@@ -139,7 +149,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 		}
 	}
 	e.Action = CheckReleaseAction
-	s, err := client.helmStatusWrapper(currentModel.Name, e, l.functionName, vpc)
+	s, err := client.helmStatusWrapper(currentModel.Name, e, client.LambdaResource.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err)
 	}
@@ -152,7 +162,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 			Manifest:  s.Manifest,
 		}
 		e.Action = GetPendingAction
-		pending, err := client.kubePendingWrapper(nil, e, l.functionName, vpc)
+		pending, err := client.kubePendingWrapper(e, client.LambdaResource.functionName, vpc)
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
@@ -251,7 +261,7 @@ func (c *Clients) helmStatusWrapper(name *string, e *Event, functionName *string
 	}
 }
 
-func (c *Clients) helmListWrapper(name *string, e *Event, functionName *string, vpc bool) ([]HelmListData, error) {
+func (c *Clients) helmListWrapper(e *Event, functionName *string, vpc bool) ([]HelmListData, error) {
 	switch vpc {
 	case true:
 		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
@@ -294,7 +304,7 @@ func (c *Clients) helmDeleteWrapper(name *string, e *Event, functionName *string
 	}
 }
 
-func (c *Clients) kubePendingWrapper(name *string, e *Event, functionName *string, vpc bool) (bool, error) {
+func (c *Clients) kubePendingWrapper(e *Event, functionName *string, vpc bool) (bool, error) {
 	switch vpc {
 	case true:
 		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
@@ -307,7 +317,7 @@ func (c *Clients) kubePendingWrapper(name *string, e *Event, functionName *strin
 	}
 }
 
-func (c *Clients) kubeResourcesWrapper(name *string, e *Event, functionName *string, vpc bool) (map[string]interface{}, error) {
+func (c *Clients) kubeResourcesWrapper(e *Event, functionName *string, vpc bool) (map[string]interface{}, error) {
 	switch vpc {
 	case true:
 		r, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)

@@ -15,18 +15,18 @@ import (
 )
 
 type TestDetailParam struct {
-	ID int
+	ID int `json:",omitempty"`
 }
 
 type TestDetailSubStructure struct {
-	ID     int
-	Params []TestDetailParam
+	ID     int               `json:",omitempty"`
+	Params []TestDetailParam `json:",omitempty"`
 }
 
 type TestDetail struct {
-	ID     int
-	Detail Detail
-	Data   TestDetailSubStructure
+	ID     int                    `json:",omitempty"`
+	Detail Detail                 `json:",omitempty"`
+	Data   TestDetailSubStructure `json:",omitempty"`
 }
 
 type Detail interface{}
@@ -87,7 +87,7 @@ func TestProcessValues(t *testing.T) {
 	data, _ := ioutil.ReadFile(TestFolder + "/test.yaml")
 	_, _ = dlLoggingSvcNoChunk(data)
 
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			result, err := c.processValues(d.m)
@@ -187,7 +187,7 @@ func TestGetReleaseName(t *testing.T) {
 		"OnlyChart": {
 			name:         nil,
 			chartname:    aws.String("TestChart"),
-			expectedName: aws.String("TestChart-" + fmt.Sprintf("%d", time.Now().Unix())),
+			expectedName: aws.String("TestChart-" + fmt.Sprint(time.Now().Unix())),
 		},
 		"NoValues": {
 			name:         nil,
@@ -349,10 +349,10 @@ func TestGenerateID(t *testing.T) {
 func TestDecodeID(t *testing.T) {
 	sIDs := []*string{aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6IlRlc3QifQ"), aws.String("wrong")}
 	eID := &ID{
-		ClusterID: "eks",
-		Name:      "Test",
-		Region:    "eu-west-1",
-		Namespace: "Test",
+		ClusterID: aws.String("eks"),
+		Name:      aws.String("Test"),
+		Region:    aws.String("eu-west-1"),
+		Namespace: aws.String("Test"),
 	}
 	eErr := "illegal base64 data "
 	for _, sID := range sIDs {
@@ -372,7 +372,7 @@ func TestDownloadChart(t *testing.T) {
 	testServer := httptest.NewServer(http.StripPrefix("/", http.FileServer(http.Dir(TestFolder))))
 	defer func() { testServer.Close() }()
 	files := []string{testServer.URL + "/test.tgz", "s3://buctket/key"}
-	c := NewMockClient(t)
+	c := NewMockClient(t, nil)
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			err := c.downloadChart(file, "/dev/null")
@@ -535,4 +535,84 @@ func TestZero(t *testing.T) {
 			t.Errorf("Zero(%v)[%d] = %t", test.v, i, !test.want)
 		}
 	}
+}
+
+func TestCheckSize(t *testing.T) {
+	tests := map[string]struct {
+		context   map[string]interface{}
+		size      int
+		assertion assert.BoolAssertionFunc
+	}{
+		"SizeOver": {
+			context: map[string]interface{}{
+				"DaemonSet": map[string]interface{}{
+					"nginx-ds": map[string]interface{}{
+						"Namespace": "default", "Status": map[string]interface{}{
+							"NumberAvailable": "1", "UpdatedNumberScheduled": "1", "currentNumberScheduled": "0", "desiredNumberScheduled": "1", "numberMisscheduled": "0", "numberReady": "1",
+						},
+					},
+				},
+			},
+			size:      128,
+			assertion: assert.True,
+		},
+		"Correct": {
+			context:   map[string]interface{}{},
+			size:      128,
+			assertion: assert.False,
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := checkSize(d.context, d.size)
+			d.assertion(t, result)
+		})
+	}
+}
+
+func TestScanFromStruct(t *testing.T) {
+	var nDetail Detail = &TestDetail{Data: TestDetailSubStructure{
+		Params: []TestDetailParam{TestDetailParam{55}}},
+	}
+	tests := map[string]struct {
+		expected  interface{}
+		value     string
+		assertion assert.BoolAssertionFunc
+	}{
+		"Correct": {
+			expected:  []TestDetailParam{TestDetailParam{55}},
+			value:     "Data.Params",
+			assertion: assert.True,
+		},
+		"NoValue": {
+			expected:  nil,
+			value:     "Test",
+			assertion: assert.False,
+		},
+	}
+	for name, d := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, ok := ScanFromStruct(nDetail, d.value)
+			d.assertion(t, ok)
+			assert.EqualValues(t, d.expected, result)
+		})
+	}
+}
+
+func TestStructToMap(t *testing.T) {
+	var nDetail Detail = &TestDetail{Data: TestDetailSubStructure{
+		Params: []TestDetailParam{TestDetailParam{55}}},
+	}
+	expectedMap := map[string]interface{}{"Data": map[string]interface{}{"Params": []interface{}{map[string]interface{}{"ID": "55"}}}}
+	result := structToMap(nDetail)
+	assert.EqualValues(t, expectedMap, result)
+}
+
+func TestStringify(t *testing.T) {
+	var nDetail Detail = &TestDetail{Data: TestDetailSubStructure{
+		Params: []TestDetailParam{TestDetailParam{55}}},
+	}
+	expectedMap := map[string]interface{}{"Data": map[string]interface{}{"Params": []interface{}{map[string]interface{}{"ID": "55"}}}}
+	result := stringify(nDetail)
+	assert.EqualValues(t, expectedMap, result)
 }

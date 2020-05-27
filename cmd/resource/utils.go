@@ -1,8 +1,10 @@
 package resource
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,24 +38,28 @@ const (
 	defaultTimeOut = 60
 )
 
+var zeroValue reflect.Value
+var interfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
+var stringType = reflect.TypeOf("")
+
 // ID struct for CFN physical resource
 type ID struct {
-	ClusterID  string `json:",omitempty"`
-	KubeConfig string `json:",omitempty"`
-	Region     string `json:",omitempty"`
-	Name       string `json:",omitempty"`
-	Namespace  string `json:",omitempty"`
+	ClusterID  *string `json:",omitempty"`
+	KubeConfig *string `json:",omitempty"`
+	Region     *string `json:",omitempty"`
+	Name       *string `json:",omitempty"`
+	Namespace  *string `json:",omitempty"`
 }
 type ClientsInterface interface{}
 
 // Client for helm, kube, aws and helm settings
 type Clients struct {
-	AWSClients AWSClientsIface
-	HelmClient *action.Configuration `json:",omitempty"`
-	ClientSet  kubernetes.Interface  `json:",omitempty"`
-	//AWSSession      *session.Session      `json:",omitempty"`
-	Settings        *cli.EnvSettings `json:",omitempty"`
+	AWSClients      AWSClientsIface
+	HelmClient      *action.Configuration `json:",omitempty"`
+	ClientSet       kubernetes.Interface  `json:",omitempty"`
+	Settings        *cli.EnvSettings      `json:",omitempty"`
 	ResourceBuilder func() *resource.Builder
+	LambdaResource  *lambdaResource
 }
 
 // Config for processed inputs
@@ -74,7 +80,7 @@ type Inputs struct {
 }
 
 // NewClients is for generate clients for helm, kube and AWS
-var NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte) (*Clients, error) {
+var NewClients = func(cluster *string, kubeconfig *string, namespace *string, ses *session.Session, role *string, customKubeconfig []byte, vpcConfig *VPCConfiguration) (*Clients, error) {
 	var err error
 	c := &Clients{}
 	if ses == nil {
@@ -84,7 +90,7 @@ var NewClients = func(cluster *string, kubeconfig *string, namespace *string, se
 		}
 	}
 	c.AWSClients = &AWSClients{AWSSession: ses}
-	if err := createKubeConfig(c.AWSClients.EKSClient(nil, nil), c.AWSClients.STSClient(nil, nil), c.AWSClients.SecretsManagerClient(nil, nil), cluster, kubeconfig, role, customKubeconfig); err != nil {
+	if err := createKubeConfig(c.AWSClients.EKSClient(nil, nil), c.AWSClients.STSClient(nil, role), c.AWSClients.SecretsManagerClient(nil, nil), cluster, kubeconfig, customKubeconfig); err != nil {
 		return nil, err
 	}
 	if namespace == nil {
@@ -103,6 +109,7 @@ var NewClients = func(cluster *string, kubeconfig *string, namespace *string, se
 	c.ResourceBuilder = func() *resource.Builder {
 		return resource.NewBuilder(restClientGetter)
 	}
+	c.LambdaResource = newLambdaResource(c.AWSClients.STSClient(nil, nil), cluster, kubeconfig, vpcConfig)
 	return c, nil
 }
 
@@ -210,7 +217,7 @@ func getReleaseName(name *string, chartname *string) *string {
 	switch name {
 	case nil:
 		if chartname != nil {
-			return aws.String(*chartname + "-" + fmt.Sprintf("%d", time.Now().Unix()))
+			return aws.String(*chartname + "-" + fmt.Sprint(time.Now().Unix()))
 		}
 		return nil
 	default:
@@ -225,7 +232,7 @@ func getReleaseNameContext(context map[string]interface{}) *string {
 	if context["Name"] == nil {
 		return nil
 	}
-	return aws.String(fmt.Sprintf("%v", context["Name"]))
+	return aws.String(fmt.Sprint(context["Name"]))
 }
 
 func getReleaseNameSpace(n *string) *string {
@@ -321,18 +328,18 @@ func generateID(m *Model, name string, region string, namespace string) (*string
 	case m.ClusterID != nil && m.KubeConfig != nil:
 		return nil, fmt.Errorf("Both ClusterID or KubeConfig can not be specified")
 	case m.ClusterID != nil:
-		i.ClusterID = *m.ClusterID
+		i.ClusterID = m.ClusterID
 	case m.KubeConfig != nil:
-		i.KubeConfig = *m.KubeConfig
+		i.KubeConfig = m.KubeConfig
 	default:
 		return nil, fmt.Errorf("Either ClusterID or KubeConfig must be specified")
 	}
 	if name == "" || namespace == "" || region == "" {
 		return nil, fmt.Errorf("Incorrect values for variable name, namespace, region")
 	}
-	i.Name = name
-	i.Namespace = namespace
-	i.Region = region
+	i.Name = aws.String(name)
+	i.Namespace = aws.String(namespace)
+	i.Region = aws.String(region)
 	out, err := json.Marshal(i)
 	if err != nil {
 		return nil, genericError("Json Marshal", err)
@@ -410,7 +417,7 @@ func getStage(context map[string]interface{}) Stage {
 	if context["StartTime"] != nil {
 		os.Setenv("StartTime", context["StartTime"].(string))
 	}
-	return Stage(fmt.Sprintf("%v", context["Stage"]))
+	return Stage(fmt.Sprint(context["Stage"]))
 }
 
 func getHash(data string) *string {
@@ -526,4 +533,130 @@ func roughlyEqual(a []*string, b []*string) bool {
 		}
 	}
 	return true
+}
+
+// checkSize to see if the size of interface is greater than
+func checkSize(v interface{}, size int) bool {
+	b := new(bytes.Buffer)
+	if err := gob.NewEncoder(b).Encode(v); err != nil {
+		//log.Printf("Warning: Error calculating size of output: %s", err.Error())
+		return false
+	}
+	if b.Len() >= size {
+		return true
+	}
+	return false
+}
+
+// ScanFromStruct scan specific fields from struct
+func ScanFromStruct(v interface{}, name string) (interface{}, bool) {
+	var temp interface{}
+	for i, k := range strings.Split(name, ".") {
+		if i == 0 {
+			temp = v
+		}
+		temp = scanFromStruct(reflect.ValueOf(temp), k)
+		if IsZero(temp) {
+			break
+		}
+		gob.Register(temp)
+	}
+	if IsZero(temp) {
+		return nil, false
+	}
+	return temp, true
+}
+
+func scanFromStruct(s reflect.Value, name string) interface{} {
+	typeOfT := s.Type()
+	switch s.Kind() {
+	case reflect.Struct:
+		for i := 0; i < s.NumField(); i++ {
+			f := s.Field(i)
+			if typeOfT.Field(i).Name == name {
+				return f.Interface()
+			}
+		}
+		return nil
+	case reflect.Ptr:
+		return scanFromStruct(s.Elem(), name)
+	}
+	return s.Interface()
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
+func structToMap(item interface{}) map[string]interface{} {
+	res := map[string]interface{}{}
+	if item == nil {
+		return res
+	}
+	v := reflect.TypeOf(item)
+	reflectValue := reflect.ValueOf(item)
+	reflectValue = reflect.Indirect(reflectValue)
+
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	for i := 0; i < v.NumField(); i++ {
+		tag := v.Field(i).Tag.Get("json")
+		if reflectValue.Field(i).CanInterface() {
+			field := reflectValue.Field(i).Interface()
+			keyName := tag
+			if tag != "" && tag != "-" {
+				if index := strings.Index(tag, ","); index != -1 {
+					if strings.Index(tag[index+1:], "omitempty") != -1 && IsZero(field) {
+						continue
+					}
+					keyName = v.Field(i).Name
+				}
+				switch v.Field(i).Type.Kind() {
+				case reflect.Struct:
+					res[keyName] = structToMap(field)
+				default:
+					res[keyName] = stringify(field)
+				}
+			}
+		}
+	}
+	return res
+}
+
+func stringify(v interface{}) interface{} {
+	val := reflect.ValueOf(v)
+	switch val.Kind() {
+	case reflect.String, reflect.Bool, reflect.Int, reflect.Int32, reflect.Int64, reflect.Float64:
+		return fmt.Sprint(v)
+	case reflect.Map:
+		out := make(map[string]interface{})
+		for _, key := range val.MapKeys() {
+			v := stringify(val.MapIndex(key).Interface())
+			out[key.String()] = v
+		}
+		return out
+	case reflect.Slice:
+		out := make([]interface{}, val.Len())
+		for i := 0; i < val.Len(); i++ {
+			v := stringify(val.Index(i).Interface())
+			out[i] = v
+		}
+		return out
+	case reflect.Struct:
+		return structToMap(v)
+	case reflect.Ptr:
+		if val.IsNil() {
+			return nil
+		}
+		return stringify(val.Elem().Interface())
+	default:
+		fmt.Println("Unsupported type in stringify " + val.Kind().String())
+		return nil
+	}
 }
