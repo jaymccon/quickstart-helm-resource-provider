@@ -30,7 +30,7 @@ func (m *mockLambdaClient) DeleteFunction(i *lambda.DeleteFunctionInput) (*lambd
 
 func getFunctionConfig() *lambda.FunctionConfiguration {
 	return &lambda.FunctionConfiguration{
-		CodeSha256:   aws.String("uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo="),
+		CodeSha256:   aws.String("hznHbmgfkAkjuQDJ3w73XPQh05yrtUZQxLmtGbanbYU="),
 		State:        aws.String("Active"),
 		FunctionName: aws.String("t-name"),
 		Handler:      aws.String(Handler),
@@ -283,7 +283,7 @@ func TestGetZip(t *testing.T) {
 	}{
 		"Correct": {
 			file:  TestZipFile,
-			eHash: "uf/I8HjgfTQppww/TIP7VeKvnAh0ce24g+3l9JhBpzo=",
+			eHash: "hznHbmgfkAkjuQDJ3w73XPQh05yrtUZQxLmtGbanbYU=",
 		},
 		"Wrongfile": {
 			file: "/nonExt",
