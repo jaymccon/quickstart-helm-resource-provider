@@ -29,12 +29,12 @@ const (
 	KubeConfigLocalPath = "/tmp/kubeConfig"
 	TempManifest        = "/tmp/manifest.yaml"
 	chunkSize           = 500
-	ResourceOutputSize  = 12288 // Set 12 KB as resources output limit
+	ResourcesOutputSize = 12288 // Set 12 KB as resources output limit
 )
 
 var (
-	ResourceOutputIgnoredTypes = []string{"*v1.ConfigMap", "*v1.Secret"}
-	ResourceOutputIncludedSpec = []string{"*v1.Service"}
+	ResourcesOutputIgnoredTypes = []string{"*v1.ConfigMap", "*v1.Secret"}
+	ResourcesOutputIncludedSpec = []string{"*v1.Service"}
 )
 
 type ReleaseData struct {
@@ -45,7 +45,7 @@ type ReleaseData struct {
 func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluster *string, kubeconfig *string, customKubeconfig []byte) error {
 	switch {
 	case cluster != nil && kubeconfig != nil:
-		return errors.New("Both ClusterID or KubeConfig can not be specified")
+		return errors.New("both ClusterID or KubeConfig can not be specified")
 	case cluster != nil:
 		defaultConfig := api.NewConfig()
 		c, err := getClusterDetails(esvc, *cluster)
@@ -94,7 +94,7 @@ func createKubeConfig(esvc EKSAPI, ssvc STSAPI, secsvc SecretsManagerAPI, cluste
 		}
 		return nil
 	default:
-		return errors.New("Either ClusterID or KubeConfig must be specified")
+		return errors.New("either ClusterID or KubeConfig must be specified")
 	}
 }
 
@@ -219,7 +219,7 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, error) {
 	log.Printf("Getting resources for %s", r.Name)
 	if r.Manifest == "" {
-		return nil, errors.New("Manifest not provided in the request")
+		return nil, errors.New("manifest not provided in the request")
 	}
 	resources := map[string]interface{}{}
 	infos, err := c.getManifestDetails(r)
@@ -231,11 +231,11 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 		var spec interface{}
 		kind := info.Object.GetObjectKind().GroupVersionKind().GroupKind().Kind
 		v := kube.AsVersioned(info)
-		if checkSize(resources, ResourceOutputSize) {
+		if checkSize(resources, ResourcesOutputSize) {
 			break
 		}
 
-		if stringInSlice(reflect.TypeOf(v).String(), ResourceOutputIgnoredTypes) {
+		if stringInSlice(reflect.TypeOf(v).String(), ResourcesOutputIgnoredTypes) {
 			continue
 		}
 		inner := make(map[string]interface{})
@@ -247,7 +247,7 @@ func (c *Clients) GetKubeResources(r *ReleaseData) (map[string]interface{}, erro
 		if ok {
 			namespace = fmt.Sprint(ns)
 		}
-		if stringInSlice(reflect.TypeOf(v).String(), ResourceOutputIncludedSpec) {
+		if stringInSlice(reflect.TypeOf(v).String(), ResourcesOutputIncludedSpec) {
 			spec, ok = ScanFromStruct(v, "Spec")
 			if ok {
 				spec = structToMap(spec)

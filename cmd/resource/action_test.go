@@ -105,7 +105,7 @@ func TestInitialize(t *testing.T) {
 			m.Name = aws.String(d.name)
 			m.ID, _ = generateID(m, d.name, "eu-west-1", "default")
 			if name == "Unknown" {
-				eRes = makeEvent(m, d.nextStage, fmt.Errorf("Unhandled stage %s", d.action))
+				eRes = makeEvent(m, d.nextStage, fmt.Errorf("unhandled stage %s", d.action))
 			} else {
 				eRes = makeEvent(m, d.nextStage, nil)
 			}
@@ -186,7 +186,7 @@ func TestCheckReleaseStatus(t *testing.T) {
 			m.Name = d.name
 			switch name {
 			case "Unknown":
-				eRes = makeEvent(m, d.nextStage, errors.New("Release failed"))
+				eRes = makeEvent(m, d.nextStage, errors.New("release failed"))
 			default:
 				eRes = makeEvent(m, d.nextStage, nil)
 			}

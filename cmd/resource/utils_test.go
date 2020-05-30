@@ -125,7 +125,7 @@ func TestGetChartDetails(t *testing.T) {
 				Repository: aws.String("test.com"),
 			},
 			expectedChart: &Chart{},
-			expectedError: aws.String("Chart is required"),
+			expectedError: aws.String("chart is required"),
 		},
 		"test3": {
 			m: &Model{
@@ -286,7 +286,7 @@ func TestGenerateID(t *testing.T) {
 			region:        "eu-west-1",
 			namespace:     "default",
 			expectedID:    eID,
-			expectedError: "Both ClusterID or KubeConfig can not be specified",
+			expectedError: "both ClusterID or KubeConfig can not be specified",
 		},
 		"NoModelValues": {
 			m: Model{
@@ -297,7 +297,7 @@ func TestGenerateID(t *testing.T) {
 			region:        "eu-west-1",
 			namespace:     "default",
 			expectedID:    eID,
-			expectedError: "Either ClusterID or KubeConfig must be specified",
+			expectedError: "either ClusterID or KubeConfig must be specified",
 		},
 		"BlankName": {
 			m: Model{
@@ -308,7 +308,7 @@ func TestGenerateID(t *testing.T) {
 			region:        "eu-west-1",
 			namespace:     "default",
 			expectedID:    eID,
-			expectedError: "Incorrect values for variable name, namespace, region",
+			expectedError: "incorrect values for variable name, namespace, region",
 		},
 		"BlankValues": {
 			m: Model{
@@ -319,7 +319,7 @@ func TestGenerateID(t *testing.T) {
 			region:        "",
 			namespace:     "",
 			expectedID:    eID,
-			expectedError: "Either ClusterID or KubeConfig must be specified",
+			expectedError: "either ClusterID or KubeConfig must be specified",
 		},
 		"CorrectValues": {
 			m: Model{

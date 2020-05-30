@@ -120,7 +120,7 @@ func getClusterDetails(svc eksiface.EKSAPI, clusterName string) (*clusterData, e
 		}
 		c.resourcesVpcConfig = result.Cluster.ResourcesVpcConfig
 	default:
-		return nil, fmt.Errorf("Cluster %s in unexpected state %s", clusterName, *result.Cluster.Status)
+		return nil, fmt.Errorf("cluster %s in unexpected state %s", clusterName, *result.Cluster.Status)
 	}
 	return c, nil
 }

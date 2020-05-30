@@ -225,7 +225,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	eError := "Not implemented: List"
+	eError := "not implemented: List"
 	req := handler.Request{
 		LogicalResourceID: "TestHelm",
 		CallbackContext:   nil,

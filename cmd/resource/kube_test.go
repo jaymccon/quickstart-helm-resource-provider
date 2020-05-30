@@ -28,7 +28,7 @@ func TestCreateKubeConfig(t *testing.T) {
 			cluster:     aws.String("eks"),
 			kubeconfig:  aws.String("arn:aws:secretsmanager:us-east-2:1234567890:secret:kubeconfig-Wt"),
 			role:        aws.String("arn:aws:iam::1234567890:role/TestRole"),
-			expectedErr: "Both ClusterID or KubeConfig can not be specified",
+			expectedErr: "both ClusterID or KubeConfig can not be specified",
 		},
 		"OnlyCluster": {
 			cluster:     aws.String("eks"),
@@ -44,7 +44,7 @@ func TestCreateKubeConfig(t *testing.T) {
 			expectedErr: "",
 		},
 		"NilValues": {
-			expectedErr: "Either ClusterID or KubeConfig must be specified",
+			expectedErr: "either ClusterID or KubeConfig must be specified",
 		},
 		"CustomKubeconfig": {
 			customKubeconfig: []byte("Test"),

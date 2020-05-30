@@ -55,10 +55,8 @@ type fakeCachedDiscoveryClient struct {
 }
 
 var (
-	TestFolder         = "testdata"
-	TestZipFile        = TestFolder + "/test_lambda.zip"
-	grace              = int64(30)
-	enableServiceLinks = corev1.DefaultEnableServiceLinks
+	TestFolder  = "testdata"
+	TestZipFile = TestFolder + "/test_lambda.zip"
 )
 
 // Session is a mock session which is used to hit the mock server
@@ -340,7 +338,7 @@ func ActionConfigFixture(t *testing.T) *action.Configuration {
 
 func awsRequest(op *request.Operation, input, output interface{}) *request.Request {
 	c := MockSession.ClientConfig("Mock", aws.NewConfig().WithRegion("us-east-2"))
-	meta := metadata.ClientInfo{
+	metaR := metadata.ClientInfo{
 		ServiceName:   "Mock",
 		SigningRegion: c.SigningRegion,
 		Endpoint:      c.Endpoint,
@@ -348,7 +346,7 @@ func awsRequest(op *request.Operation, input, output interface{}) *request.Reque
 		JSONVersion:   "1.1",
 		TargetPrefix:  "MockServer",
 	}
-	return request.New(*c.Config, meta, c.Handlers, nil, op, input, output)
+	return request.New(*c.Config, metaR, c.Handlers, nil, op, input, output)
 }
 
 func makeMeSomeReleases(store *storage.Storage, t *testing.T) {

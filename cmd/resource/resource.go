@@ -12,8 +12,6 @@ import (
 	"helm.sh/helm/v3/pkg/helmpath/xdg"
 )
 
-const callbackDelay = 30
-
 func init() {
 	os.Setenv("HELM_DRIVER", HelmDriver)
 	os.Setenv(xdg.CacheHomeEnvVar, HelmCacheHomeEnvVar)
@@ -22,7 +20,7 @@ func init() {
 	os.Setenv("StartTime", time.Now().Format(time.RFC3339))
 }
 
-// Create handles the Create event from the Cloudformation service.
+// Create handles the Create event from the CloudFormation service.
 func Create(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
 	stage := getStage(req.CallbackContext)
@@ -38,11 +36,11 @@ func Create(req handler.Request, _ *Model, currentModel *Model) (handler.Progres
 		return checkReleaseStatus(req.Session, currentModel, CompleteStage), nil
 	default:
 		log.Println("Failed to identify stage.")
-		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
+		return makeEvent(currentModel, NoStage, fmt.Errorf("unhandled stage %s", stage)), nil
 	}
 }
 
-// Read handles the Read event from the Cloudformation service.
+// Read handles the Read event from the CloudFormation service.
 func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	var err error
 	data, err := DecodeID(currentModel.ID)
@@ -101,7 +99,7 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 	return makeEvent(currentModel, CompleteStage, nil), nil
 }
 
-// Update handles the Update event from the Cloudformation service.
+// Update handles the Update event from the CloudFormation service.
 func Update(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
 	stage := getStage(req.CallbackContext)
@@ -117,11 +115,11 @@ func Update(req handler.Request, _ *Model, currentModel *Model) (handler.Progres
 		return checkReleaseStatus(req.Session, currentModel, CompleteStage), nil
 	default:
 		log.Println("Failed to identify stage.")
-		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
+		return makeEvent(currentModel, NoStage, fmt.Errorf("unhandled stage %s", stage)), nil
 	}
 }
 
-// Delete handles the Delete event from the Cloudformation service.
+// Delete handles the Delete event from the CloudFormation service.
 func Delete(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	defer LogPanic()
 	stage := getStage(req.CallbackContext)
@@ -131,11 +129,11 @@ func Delete(req handler.Request, _ *Model, currentModel *Model) (handler.Progres
 		return initialize(req.Session, currentModel, UninstallReleaseAction), nil
 	default:
 		log.Println("Failed to identify stage.")
-		return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", stage)), nil
+		return makeEvent(currentModel, NoStage, fmt.Errorf("unhandled stage %s", stage)), nil
 	}
 }
 
-// List handles the List event from the Cloudformation service.
+// List handles the List event from the CloudFormation service.
 func List(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressEvent, error) {
 	// Add your code here:
 	// * Make API calls (use req.Session)
@@ -155,5 +153,5 @@ func List(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 
 	// Not implemented, return an empty handler.ProgressEvent
 	// and an error
-	return handler.ProgressEvent{}, errors.New("Not implemented: List")
+	return handler.ProgressEvent{}, errors.New("not implemented: List")
 }

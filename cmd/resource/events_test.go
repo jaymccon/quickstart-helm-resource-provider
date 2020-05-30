@@ -116,7 +116,7 @@ func TestMakeEvent(t *testing.T) {
 			},
 			stage:           ReleaseStabilize,
 			err:             nil,
-			expectedMessage: "Resource creation timed out",
+			expectedMessage: "resource creation timed out",
 			expectedStatus:  handler.Failed,
 			expectedContext: nil,
 		},

@@ -254,7 +254,7 @@ func functionNotExists(err error) bool {
 }
 
 func newLambdaResource(svc STSAPI, cluster *string, kubeconfig *string, vpc *VPCConfiguration) *lambdaResource {
-	var nameSuffix *string
+	nameSuffix := aws.String("default")
 	var err error
 	l := &lambdaResource{
 		functionFile: ZipFile,

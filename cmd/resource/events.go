@@ -47,7 +47,7 @@ func inProgressEvent(model *Model, stage Stage) handler.ProgressEvent {
 func makeEvent(model *Model, nextStage Stage, err error) handler.ProgressEvent {
 	timeout := checkTimeOut(os.Getenv("StartTime"), model.TimeOut)
 	if timeout {
-		return errorEvent(nil, errors.New("Resource creation timed out"))
+		return errorEvent(nil, errors.New("resource creation timed out"))
 	}
 	if err != nil {
 		return errorEvent(model, err)

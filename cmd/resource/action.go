@@ -116,7 +116,7 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		}
 		return client.lambdaDestroy(currentModel)
 	}
-	return makeEvent(currentModel, NoStage, fmt.Errorf("Unhandled stage %s", action))
+	return makeEvent(currentModel, NoStage, fmt.Errorf("unhandled stage %s", action))
 }
 
 func checkReleaseStatus(session *session.Session, currentModel *Model, successStage Stage) handler.ProgressEvent {
@@ -175,7 +175,7 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 	case release.StatusPendingInstall, release.StatusPendingUpgrade:
 		return makeEvent(currentModel, ReleaseStabilize, nil)
 	default:
-		return makeEvent(currentModel, NoStage, errors.New("Release failed"))
+		return makeEvent(currentModel, NoStage, errors.New("release failed"))
 
 	}
 }

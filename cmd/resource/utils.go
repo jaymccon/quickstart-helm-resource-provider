@@ -48,7 +48,7 @@ type ID struct {
 }
 type ClientsInterface interface{}
 
-// Client for helm, kube, aws and helm settings
+// Clients for helm, kube, aws and helm settings
 type Clients struct {
 	AWSClients      AWSClientsIface
 	HelmClient      *action.Configuration `json:",omitempty"`
@@ -160,7 +160,7 @@ func getChartDetails(m *Model) (*Chart, error) {
 	// Parse chart
 	switch m.Chart {
 	case nil:
-		return nil, errors.New("Chart is required")
+		return nil, errors.New("chart is required")
 	default:
 		// Check if chart is remote url
 		u, err := url.Parse(*m.Chart)
@@ -296,7 +296,7 @@ func downloadHTTP(url string, filepath string) error {
 		return genericError("Downloading file", err)
 	}
 	if resp.StatusCode != 200 {
-		return genericError("Downloading file", fmt.Errorf("Got response %v", resp.StatusCode))
+		return genericError("Downloading file", fmt.Errorf("got response %v", resp.StatusCode))
 	}
 
 	defer resp.Body.Close()
@@ -322,16 +322,16 @@ func generateID(m *Model, name string, region string, namespace string) (*string
 	i := &ID{}
 	switch {
 	case m.ClusterID != nil && m.KubeConfig != nil:
-		return nil, fmt.Errorf("Both ClusterID or KubeConfig can not be specified")
+		return nil, fmt.Errorf("both ClusterID or KubeConfig can not be specified")
 	case m.ClusterID != nil:
 		i.ClusterID = m.ClusterID
 	case m.KubeConfig != nil:
 		i.KubeConfig = m.KubeConfig
 	default:
-		return nil, fmt.Errorf("Either ClusterID or KubeConfig must be specified")
+		return nil, fmt.Errorf("either ClusterID or KubeConfig must be specified")
 	}
 	if name == "" || namespace == "" || region == "" {
-		return nil, fmt.Errorf("Incorrect values for variable name, namespace, region")
+		return nil, fmt.Errorf("incorrect values for variable name, namespace, region")
 	}
 	i.Name = aws.String(name)
 	i.Namespace = aws.String(namespace)
@@ -351,7 +351,7 @@ func DecodeID(id *string) (*ID, error) {
 	if err != nil {
 		return nil, genericError("Decode", err)
 	}
-	err = json.Unmarshal([]byte(str), i)
+	err = json.Unmarshal(str, i)
 	if err != nil {
 		return nil, genericError("Json Unmarshal", err)
 	}
