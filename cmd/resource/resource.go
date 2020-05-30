@@ -87,7 +87,7 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 	}
 	currentModel.Chart = aws.String(s.ChartName)
 	currentModel.Version = aws.String(s.ChartVersion)
-	/* Disable fetching resources create by helm */
+	/* Disable fetching resources created by helm
 	e.ReleaseData = &ReleaseData{
 		Name:      aws.StringValue(data.Name),
 		Namespace: s.Namespace,
@@ -97,7 +97,7 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 	currentModel.Resources, err = client.kubeResourcesWrapper(e, client.LambdaResource.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
-	}
+	}*/
 	return makeEvent(currentModel, CompleteStage, nil), nil
 }
 
