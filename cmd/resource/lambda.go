@@ -21,7 +21,7 @@ const (
 	ZipFile            string = "k8svpc.zip"
 	FunctionNamePrefix string = "helm-provider-vpc-connector-"
 	Handler            string = "k8svpc"
-	MemorySize         int64  = 256
+	MemorySize         int64  = 384
 	Runtime            string = "go1.x"
 	Timeout            int64  = 900
 	UpdateInProgress   string = "The function could not be updated due to a concurrent update operation."
