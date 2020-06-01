@@ -47,7 +47,14 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 	if err != nil {
 		return handler.ProgressEvent{}, err
 	}
-	client, err := NewClients(data.ClusterID, data.KubeConfig, data.Namespace, req.Session, currentModel.RoleArn, nil, currentModel.VPCConfiguration)
+	// Load model with decode values of ID.
+	currentModel.Name = data.Name
+	currentModel.Namespace = data.Namespace
+	currentModel.ClusterID = data.ClusterID
+	currentModel.KubeConfig = data.KubeConfig
+	currentModel.VPCConfiguration = data.VPCConfiguration
+
+	client, err := NewClients(currentModel.ClusterID, currentModel.KubeConfig, data.Namespace, req.Session, currentModel.RoleArn, nil, currentModel.VPCConfiguration)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
 	}
@@ -56,9 +63,11 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
 		}
+		// generate lambda resource when auto detected vpc configs
+		if !IsZero(currentModel.VPCConfiguration) {
+			client.LambdaResource = newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+		}
 	}
-	currentModel.Name = data.Name
-	currentModel.Namespace = data.Namespace
 
 	e := &Event{}
 	e.Model = currentModel
@@ -66,7 +75,6 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 	vpc := false
 	if !IsZero(currentModel.VPCConfiguration) {
 		vpc = true
-		e.Action = GetResourcesAction
 		e.Kubeconfig, err = getLocalKubeConfig()
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err), nil
@@ -79,7 +87,8 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 			return makeEvent(currentModel, NoStage, fmt.Errorf("vpc connector didn't stabilize in time")), nil
 		}
 	}
-	s, err := client.helmStatusWrapper(data.Name, e, client.LambdaResource.functionName, vpc)
+	e.Action = CheckReleaseAction
+	s, err := client.helmStatusWrapper(currentModel.Name, e, client.LambdaResource.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil
 	}
@@ -92,6 +101,7 @@ func Read(req handler.Request, _ *Model, currentModel *Model) (handler.ProgressE
 		Chart:     s.Chart,
 		Manifest:  s.Manifest,
 	}
+	e.Action = GetResourcesAction
 	currentModel.Resources, err = client.kubeResourcesWrapper(e, client.LambdaResource.functionName, vpc)
 	if err != nil {
 		return makeEvent(currentModel, NoStage, err), nil

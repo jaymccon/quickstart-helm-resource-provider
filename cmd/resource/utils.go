@@ -40,12 +40,14 @@ const (
 
 // ID struct for CFN physical resource
 type ID struct {
-	ClusterID  *string `json:",omitempty"`
-	KubeConfig *string `json:",omitempty"`
-	Region     *string `json:",omitempty"`
-	Name       *string `json:",omitempty"`
-	Namespace  *string `json:",omitempty"`
+	ClusterID        *string           `json:",omitempty"`
+	KubeConfig       *string           `json:",omitempty"`
+	Region           *string           `json:",omitempty"`
+	Name             *string           `json:",omitempty"`
+	Namespace        *string           `json:",omitempty"`
+	VPCConfiguration *VPCConfiguration `json:",omitempty"`
 }
+
 type ClientsInterface interface{}
 
 // Clients for helm, kube, aws and helm settings
@@ -336,6 +338,9 @@ func generateID(m *Model, name string, region string, namespace string) (*string
 	i.Name = aws.String(name)
 	i.Namespace = aws.String(namespace)
 	i.Region = aws.String(region)
+	if !IsZero(m.VPCConfiguration) {
+		i.VPCConfiguration = m.VPCConfiguration
+	}
 	out, err := json.Marshal(i)
 	if err != nil {
 		return nil, genericError("Json Marshal", err)

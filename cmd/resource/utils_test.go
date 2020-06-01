@@ -332,6 +332,21 @@ func TestGenerateID(t *testing.T) {
 			expectedID:    eID,
 			expectedError: "",
 		},
+		"CorrectValuesWithVPC": {
+			m: Model{
+				ClusterID:  aws.String("eks"),
+				KubeConfig: nil,
+				VPCConfiguration: &VPCConfiguration{
+					SecurityGroupIds: []string{"sg-01"},
+					SubnetIds:        []string{"subnet-01"},
+				},
+			},
+			name:          "Test",
+			region:        "eu-west-1",
+			namespace:     "default",
+			expectedID:    aws.String("eyJDbHVzdGVySUQiOiJla3MiLCJSZWdpb24iOiJldS13ZXN0LTEiLCJOYW1lIjoiVGVzdCIsIk5hbWVzcGFjZSI6ImRlZmF1bHQiLCJWUENDb25maWd1cmF0aW9uIjp7IlNlY3VyaXR5R3JvdXBJZHMiOlsic2ctMDEiXSwiU3VibmV0SWRzIjpbInN1Ym5ldC0wMSJdfX0"),
+			expectedError: "",
+		},
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -339,6 +354,7 @@ func TestGenerateID(t *testing.T) {
 			if err != nil {
 				assert.EqualError(t, err, d.expectedError)
 			} else {
+				t.Log(aws.StringValue(result))
 				assert.EqualValues(t, aws.StringValue(d.expectedID), aws.StringValue(result))
 			}
 		})
@@ -354,7 +370,7 @@ func TestDecodeID(t *testing.T) {
 		Region:    aws.String("eu-west-1"),
 		Namespace: aws.String("Test"),
 	}
-	eErr := "illegal base64 data "
+	eErr := "illegal base64 data"
 	for _, sID := range sIDs {
 		t.Run("test", func(t *testing.T) {
 			result, err := DecodeID(sID)

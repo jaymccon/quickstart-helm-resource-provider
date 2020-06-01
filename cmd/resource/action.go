@@ -39,6 +39,10 @@ func initialize(session *session.Session, currentModel *Model, action Action) ha
 		if err != nil {
 			return makeEvent(currentModel, NoStage, err)
 		}
+		// generate lambda resource when auto detected vpc configs
+		if !IsZero(currentModel.VPCConfiguration) {
+			client.LambdaResource = newLambdaResource(client.AWSClients.STSClient(nil, nil), currentModel.ClusterID, currentModel.KubeConfig, currentModel.VPCConfiguration)
+		}
 	}
 	e := &Event{}
 	e.Inputs = new(Inputs)
