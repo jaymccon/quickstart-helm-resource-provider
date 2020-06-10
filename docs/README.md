@@ -16,10 +16,15 @@ To declare this entity in your AWS CloudFormation template, use the following sy
         "<a href="#kubeconfig" title="KubeConfig">KubeConfig</a>" : <i>String</i>,
         "<a href="#rolearn" title="RoleArn">RoleArn</a>" : <i>String</i>,
         "<a href="#repository" title="Repository">Repository</a>" : <i>String</i>,
+        "<a href="#chart" title="Chart">Chart</a>" : <i>String</i>,
+        "<a href="#namespace" title="Namespace">Namespace</a>" : <i>String</i>,
+        "<a href="#name" title="Name">Name</a>" : <i>String</i>,
         "<a href="#values" title="Values">Values</a>" : <i><a href="values.md">Values</a></i>,
         "<a href="#valueyaml" title="ValueYaml">ValueYaml</a>" : <i>String</i>,
+        "<a href="#version" title="Version">Version</a>" : <i>String</i>,
         "<a href="#valueoverrideurl" title="ValueOverrideURL">ValueOverrideURL</a>" : <i>String</i>,
         "<a href="#id" title="ID">ID</a>" : <i>String</i>,
+        "<a href="#resources" title="Resources">Resources</a>" : <i><a href="resources.md">Resources</a></i>,
         "<a href="#timeout" title="TimeOut">TimeOut</a>" : <i>Double</i>,
         "<a href="#vpcconfiguration" title="VPCConfiguration">VPCConfiguration</a>" : <i><a href="vpcconfiguration.md">VPCConfiguration</a></i>
     }
@@ -35,10 +40,15 @@ Properties:
     <a href="#kubeconfig" title="KubeConfig">KubeConfig</a>: <i>String</i>
     <a href="#rolearn" title="RoleArn">RoleArn</a>: <i>String</i>
     <a href="#repository" title="Repository">Repository</a>: <i>String</i>
+    <a href="#chart" title="Chart">Chart</a>: <i>String</i>
+    <a href="#namespace" title="Namespace">Namespace</a>: <i>String</i>
+    <a href="#name" title="Name">Name</a>: <i>String</i>
     <a href="#values" title="Values">Values</a>: <i><a href="values.md">Values</a></i>
     <a href="#valueyaml" title="ValueYaml">ValueYaml</a>: <i>String</i>
+    <a href="#version" title="Version">Version</a>: <i>String</i>
     <a href="#valueoverrideurl" title="ValueOverrideURL">ValueOverrideURL</a>: <i>String</i>
     <a href="#id" title="ID">ID</a>: <i>String</i>
+    <a href="#resources" title="Resources">Resources</a>: <i><a href="resources.md">Resources</a></i>
     <a href="#timeout" title="TimeOut">TimeOut</a>: <i>Double</i>
     <a href="#vpcconfiguration" title="VPCConfiguration">VPCConfiguration</a>: <i><a href="vpcconfiguration.md">VPCConfiguration</a></i>
 </pre>
@@ -85,6 +95,36 @@ _Type_: String
 
 _Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-no-interrupt)
 
+#### Chart
+
+Chart name
+
+_Required_: Yes
+
+_Type_: String
+
+_Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-no-interrupt)
+
+#### Namespace
+
+Namespace to use with helm. Created if doesn't exist and default will be used if not provided
+
+_Required_: No
+
+_Type_: String
+
+_Update requires_: [Replacement](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-replacement)
+
+#### Name
+
+Name for the helm release
+
+_Required_: No
+
+_Type_: String
+
+_Update requires_: [Replacement](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-replacement)
+
 #### Values
 
 Custom Values can optionally be specified
@@ -98,6 +138,16 @@ _Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormati
 #### ValueYaml
 
 String representation of a values.yaml file
+
+_Required_: No
+
+_Type_: String
+
+_Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-no-interrupt)
+
+#### Version
+
+Version can be specified, if not latest will be used
 
 _Required_: No
 
@@ -124,6 +174,16 @@ Primary identifier for Cloudformation
 _Required_: No
 
 _Type_: String
+
+_Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-no-interrupt)
+
+#### Resources
+
+Resources from the helm charts
+
+_Required_: No
+
+_Type_: <a href="resources.md">Resources</a>
 
 _Update requires_: [No interruption](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-update-behaviors.html#update-no-interrupt)
 
