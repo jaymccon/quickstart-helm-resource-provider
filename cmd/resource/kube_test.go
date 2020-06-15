@@ -4,6 +4,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/api/extensions/v1beta1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"os"
@@ -179,18 +180,21 @@ func TestReady(t *testing.T) {
 	tests := map[string]struct {
 		assertion assert.BoolAssertionFunc
 		ing       *v1beta1.Ingress
+		ingN      *networkingv1beta1.Ingress
 		pvc       *corev1.PersistentVolumeClaim
 		dep       *appsv1.Deployment
 	}{
 		"Pending": {
 			assertion: assert.False,
 			ing:       ing("test-ingress", "default", true),
+			ingN:      ingN("test-ingressN", "default", true),
 			pvc:       vol("test-pvc", "default", true),
 			dep:       dep("test-dep", "default", true),
 		},
 		"NoPending": {
 			assertion: assert.True,
 			ing:       ing("test-ingress", "default", false),
+			ingN:      ingN("test-ingressN", "default", false),
 			pvc:       vol("test-pvc", "default", false),
 			dep:       dep("test-dep", "default", false),
 		},
@@ -198,6 +202,8 @@ func TestReady(t *testing.T) {
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			result := ingressReady(d.ing)
+			d.assertion(t, result)
+			result = ingressNReady(d.ingN)
 			d.assertion(t, result)
 			result = volumeReady(d.pvc)
 			d.assertion(t, result)

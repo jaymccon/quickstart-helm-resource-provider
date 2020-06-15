@@ -632,3 +632,49 @@ func TestStringify(t *testing.T) {
 	result := stringify(nDetail)
 	assert.EqualValues(t, expectedMap, result)
 }
+
+func TestPushLastKnownError(t *testing.T) {
+	tests := map[string]struct {
+		expected []string
+		msg      string
+	}{
+		"Correct": {
+			expected: []string{"Test", "Test2"},
+			msg:      "Test2",
+		},
+		"Duplicate": {
+			expected: []string{"Test"},
+			msg:      "Test",
+		},
+	}
+	for name, d := range tests {
+		LastKnownErrors = []string{"Test"}
+		t.Run(name, func(t *testing.T) {
+			pushLastKnownError(d.msg)
+			assert.EqualValues(t, d.expected, LastKnownErrors)
+		})
+	}
+}
+
+func TestPopLastKnownError(t *testing.T) {
+	tests := map[string]struct {
+		expected []string
+		msg      string
+	}{
+		"Correct": {
+			expected: []string{},
+			msg:      "Test",
+		},
+		"Incorrect": {
+			expected: []string{"Test"},
+			msg:      "Test2",
+		},
+	}
+	for name, d := range tests {
+		LastKnownErrors = []string{"Test"}
+		t.Run(name, func(t *testing.T) {
+			popLastKnownError(d.msg)
+			assert.EqualValues(t, d.expected, LastKnownErrors)
+		})
+	}
+}

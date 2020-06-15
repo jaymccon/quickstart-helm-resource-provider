@@ -37,6 +37,7 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 	case resource.GetPendingAction:
 		fmt.Println("GetPendingAction")
 		res.PendingResources, err = client.CheckPendingResources(e.ReleaseData)
+		res.LastKnownErrors = resource.LastKnownErrors
 		return res, err
 	case resource.GetResourcesAction:
 		fmt.Println("GetResourcesAction")

@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"io"
 	"io/ioutil"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -420,7 +421,7 @@ func buildChart(opts ...chartOption) *chart.Chart {
 func svc(name string, namespace string, sType v1.ServiceType) *v1.Service {
 	var ingress []v1.LoadBalancerIngress
 	if sType == v1.ServiceTypeLoadBalancer {
-		ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "elb.test.com"}}
+		ingress = []v1.LoadBalancerIngress{{Hostname: "elb.test.com"}}
 	}
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -529,7 +530,7 @@ func ss(name string, namespace string, dtype appsv1.StatefulSetUpdateStrategyTyp
 func ing(name string, namespace string, pending bool) *v1beta1.Ingress {
 	var ingress []v1.LoadBalancerIngress
 	if !pending {
-		ingress = []v1.LoadBalancerIngress{v1.LoadBalancerIngress{Hostname: "ingress.test.com"}}
+		ingress = []v1.LoadBalancerIngress{{Hostname: "ingress.test.com"}}
 	}
 	return &v1beta1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -537,6 +538,24 @@ func ing(name string, namespace string, pending bool) *v1beta1.Ingress {
 			Namespace: namespace,
 		},
 		Status: v1beta1.IngressStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: ingress,
+			},
+		},
+	}
+}
+
+func ingN(name string, namespace string, pending bool) *networkingv1beta1.Ingress {
+	var ingress []v1.LoadBalancerIngress
+	if !pending {
+		ingress = []v1.LoadBalancerIngress{{Hostname: "ingressN.test.com"}}
+	}
+	return &networkingv1beta1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Status: networkingv1beta1.IngressStatus{
 			LoadBalancer: v1.LoadBalancerStatus{
 				Ingress: ingress,
 			},

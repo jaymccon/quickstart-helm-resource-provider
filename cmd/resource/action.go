@@ -24,7 +24,7 @@ const (
 )
 
 const (
-	lambdaStableTryCount = 3
+	retryCount = 3
 )
 
 func initialize(session *session.Session, currentModel *Model, action Action) handler.ProgressEvent {
@@ -177,8 +177,10 @@ func checkReleaseStatus(session *session.Session, currentModel *Model, successSt
 		log.Printf("Release %s have no pending resources.", e.ReleaseData.Name)
 		return makeEvent(currentModel, successStage, nil)
 	case release.StatusPendingInstall, release.StatusPendingUpgrade:
+		pushLastKnownError(fmt.Sprintf("Release %s/%s in %s state", s.Namespace, *currentModel.Name, s.Status))
 		return makeEvent(currentModel, ReleaseStabilize, nil)
 	default:
+		pushLastKnownError(fmt.Sprintf("Release %s/%s in %s state", s.Namespace, *currentModel.Name, s.Status))
 		return makeEvent(currentModel, NoStage, errors.New("release failed"))
 
 	}
@@ -209,7 +211,7 @@ func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
 			return false, err
 		}
 		count := 0
-		for count < lambdaStableTryCount {
+		for count < retryCount {
 			state, err = checklambdaState(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 			if err != nil {
 				return false, err
@@ -234,7 +236,7 @@ func (c *Clients) initializeLambda(l *lambdaResource) (bool, error) {
 		return true, nil
 	case StatePending:
 		count := 0
-		for count < lambdaStableTryCount {
+		for count < retryCount {
 			state, err = checklambdaState(c.AWSClients.LambdaClient(nil, nil), l.functionName)
 			if err != nil {
 				return false, err
@@ -315,6 +317,7 @@ func (c *Clients) kubePendingWrapper(e *Event, functionName *string, vpc bool) (
 		if err != nil {
 			return true, err
 		}
+		LastKnownErrors = r.LastKnownErrors
 		return r.PendingResources, err
 	default:
 		return c.CheckPendingResources(e.ReleaseData)

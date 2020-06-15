@@ -1,16 +1,18 @@
 package resource
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/aws-cloudformation/cloudformation-cli-go-plugin/cfn/handler"
 	"github.com/aws/aws-sdk-go/aws"
 )
 
 const callbackDelaySeconds = 30
+
+var LastKnownErrors []string
 
 func errorEvent(model *Model, err error) handler.ProgressEvent {
 	log.Printf("Returning ERROR...")
@@ -46,8 +48,9 @@ func inProgressEvent(model *Model, stage Stage) handler.ProgressEvent {
 
 func makeEvent(model *Model, nextStage Stage, err error) handler.ProgressEvent {
 	timeout := checkTimeOut(os.Getenv("StartTime"), model.TimeOut)
-	if timeout {
-		return errorEvent(nil, errors.New("resource creation timed out"))
+	if timeout && nextStage != CompleteStage {
+		errorString := fmt.Sprintf("resource creation timed out\n, LastKnownErrors: %s", strings.Join(LastKnownErrors, "\n "))
+		return errorEvent(nil, fmt.Errorf(errorString))
 	}
 	if err != nil {
 		return errorEvent(model, err)

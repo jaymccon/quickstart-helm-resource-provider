@@ -116,15 +116,26 @@ func TestMakeEvent(t *testing.T) {
 			},
 			stage:           ReleaseStabilize,
 			err:             nil,
-			expectedMessage: "resource creation timed out",
+			expectedMessage: "resource creation timed out\n, LastKnownErrors: Test",
 			expectedStatus:  handler.Failed,
+			expectedContext: nil,
+		},
+		"TimeOutWithCompleteStage": {
+			m: &Model{
+				Name: aws.String("Test"),
+			},
+			stage:           CompleteStage,
+			err:             nil,
+			expectedMessage: "",
+			expectedStatus:  handler.Success,
 			expectedContext: nil,
 		},
 	}
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			switch name {
-			case "TimeOut":
+			case "TimeOut", "TimeOutWithCompleteStage":
+				LastKnownErrors = []string{"Test"}
 				os.Setenv("StartTime", time.Now().Add(time.Hour*-10).Format(time.RFC3339))
 			default:
 				os.Setenv("StartTime", st)

@@ -63,6 +63,7 @@ type LambdaResponse struct {
 	ListData         []HelmListData         `json:",omitempty"`
 	Resources        map[string]interface{} `json:",omitempty"`
 	PendingResources bool                   `json:",omitempty"`
+	LastKnownErrors  []string               `json:",omitempty"`
 }
 
 type State string

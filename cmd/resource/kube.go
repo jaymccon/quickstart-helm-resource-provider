@@ -14,6 +14,7 @@ import (
 	appsv1beta2 "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -130,7 +131,7 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 		return true, err
 	}
 	for _, info := range infos {
-		if errCount >= lambdaStableTryCount*2 {
+		if errCount >= retryCount*2 {
 			return true, fmt.Errorf("couldn't get the resources")
 		}
 		switch value := kube.AsVersioned(info).(type) {
@@ -179,6 +180,10 @@ func (c *Clients) CheckPendingResources(r *ReleaseData) (bool, error) {
 			}
 		case *extensionsv1beta1.Ingress:
 			if !ingressReady(value) {
+				pArray = append(pArray, false)
+			}
+		case *networkingv1beta1.Ingress:
+			if !ingressNReady(value) {
 				pArray = append(pArray, false)
 			}
 		case *apiextv1beta1.CustomResourceDefinition:
@@ -304,18 +309,35 @@ func (c *Clients) getManifestDetails(r *ReleaseData) ([]*resource.Info, error) {
 }
 
 func ingressReady(i *extensionsv1beta1.Ingress) bool {
-	if i.Status.LoadBalancer.Ingress == nil {
-		log.Printf("Ingress does not have address: %s/%s", i.GetNamespace(), i.GetName())
+	if IsZero(i.Status.LoadBalancer) {
+		msg := fmt.Sprintf("Ingress does not have address: %s/%s", i.GetNamespace(), i.GetName())
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
+	popLastKnownError(i.GetName())
+	return true
+}
+
+func ingressNReady(i *networkingv1beta1.Ingress) bool {
+	if IsZero(i.Status.LoadBalancer) {
+		msg := fmt.Sprintf("Ingress does not have address: %s/%s", i.GetNamespace(), i.GetName())
+		log.Printf(msg)
+		pushLastKnownError(msg)
+		return false
+	}
+	popLastKnownError(i.GetName())
 	return true
 }
 
 func volumeReady(v *corev1.PersistentVolumeClaim) bool {
 	if v.Status.Phase != corev1.ClaimBound {
-		log.Printf("PersistentVolumeClaim is not bound: %s/%s", v.GetNamespace(), v.GetName())
+		msg := fmt.Sprintf("PersistentVolumeClaim is not bound: %s/%s", v.GetNamespace(), v.GetName())
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
+	popLastKnownError(v.GetName())
 	return true
 }
 
@@ -327,7 +349,9 @@ func serviceReady(s *corev1.Service) bool {
 
 	// Make sure the service is not explicitly set to "None" before checking the IP
 	if s.Spec.ClusterIP != corev1.ClusterIPNone && s.Spec.ClusterIP == "" {
-		log.Printf("Service does not have cluster IP address: %s/%s", s.GetNamespace(), s.GetName())
+		msg := fmt.Sprintf("Service does not have cluster IP address: %s/%s", s.GetNamespace(), s.GetName())
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
 
@@ -336,22 +360,29 @@ func serviceReady(s *corev1.Service) bool {
 		// do not wait when at least 1 external IP is set
 		if len(s.Spec.ExternalIPs) > 0 {
 			log.Printf("Service %s/%s has external IP addresses (%v), marking as ready", s.GetNamespace(), s.GetName(), s.Spec.ExternalIPs)
+			popLastKnownError(s.GetName())
 			return true
 		}
 
 		if s.Status.LoadBalancer.Ingress == nil {
-			log.Printf("Service does not have load balancer ingress IP address: %s/%s", s.GetNamespace(), s.GetName())
+			msg := fmt.Sprintf("Service does not have load balancer ingress IP address: %s/%s", s.GetNamespace(), s.GetName())
+			log.Printf(msg)
+			pushLastKnownError(msg)
 			return false
 		}
 	}
+	popLastKnownError(s.GetName())
 	return true
 }
 
 func deploymentReady(dep *appsv1.Deployment) bool {
 	if !(dep.Status.ReadyReplicas >= *dep.Spec.Replicas) {
-		log.Printf("Deployment is not ready: %s/%s. %d out of %d expected pods are ready", dep.Namespace, dep.Name, dep.Status.ReadyReplicas, *dep.Spec.Replicas)
+		msg := fmt.Sprintf("Deployment is not ready: %s/%s. %d out of %d expected pods are ready", dep.Namespace, dep.Name, dep.Status.ReadyReplicas, *dep.Spec.Replicas)
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
+	popLastKnownError(dep.GetName())
 	return true
 }
 
@@ -363,7 +394,9 @@ func daemonSetReady(ds *appsv1.DaemonSet) bool {
 
 	// Make sure all the updated pods have been scheduled
 	if ds.Status.UpdatedNumberScheduled != ds.Status.DesiredNumberScheduled {
-		log.Printf("DaemonSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", ds.Namespace, ds.Name, ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled)
+		msg := fmt.Sprintf("DaemonSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", ds.Namespace, ds.Name, ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled)
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
 	maxUnavailable, err := intstr.GetValueFromIntOrPercent(ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable, int(ds.Status.DesiredNumberScheduled), true)
@@ -373,9 +406,12 @@ func daemonSetReady(ds *appsv1.DaemonSet) bool {
 
 	expectedReady := int(ds.Status.DesiredNumberScheduled) - maxUnavailable
 	if !(int(ds.Status.NumberReady) >= expectedReady) {
-		log.Printf("DaemonSet is not ready: %s/%s. %d out of %d expected pods are ready", ds.Namespace, ds.Name, ds.Status.NumberReady, expectedReady)
+		msg := fmt.Sprintf("DaemonSet is not ready: %s/%s. %d out of %d expected pods are ready", ds.Namespace, ds.Name, ds.Status.NumberReady, expectedReady)
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
+	popLastKnownError(ds.GetName())
 	return true
 }
 
@@ -407,14 +443,19 @@ func statefulSetReady(sts *appsv1.StatefulSet) bool {
 
 	// Make sure all the updated pods have been scheduled
 	if int(sts.Status.UpdatedReplicas) != expectedReplicas {
-		log.Printf("StatefulSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", sts.Namespace, sts.Name, sts.Status.UpdatedReplicas, expectedReplicas)
+		msg := fmt.Sprintf("StatefulSet is not ready: %s/%s. %d out of %d expected pods have been scheduled", sts.Namespace, sts.Name, sts.Status.UpdatedReplicas, expectedReplicas)
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
 
 	if int(sts.Status.ReadyReplicas) != replicas {
-		log.Printf("StatefulSet is not ready: %s/%s. %d out of %d expected pods are ready", sts.Namespace, sts.Name, sts.Status.ReadyReplicas, replicas)
+		msg := fmt.Sprintf("StatefulSet is not ready: %s/%s. %d out of %d expected pods are ready", sts.Namespace, sts.Name, sts.Status.ReadyReplicas, replicas)
+		log.Printf(msg)
+		pushLastKnownError(msg)
 		return false
 	}
+	popLastKnownError(sts.GetName())
 	return true
 }
 
@@ -423,6 +464,7 @@ func crdBetaReady(crd *apiextv1beta1.CustomResourceDefinition) bool {
 		switch cond.Type {
 		case apiextv1beta1.Established:
 			if cond.Status == apiextv1beta1.ConditionTrue {
+				popLastKnownError(crd.Name)
 				return true
 			}
 		case apiextv1beta1.NamesAccepted:
@@ -431,10 +473,14 @@ func crdBetaReady(crd *apiextv1beta1.CustomResourceDefinition) bool {
 				// job of this function to fail because of that. Instead,
 				// we treat it as a success, since the process should be able to
 				// continue.
+				popLastKnownError(crd.Name)
 				return true
 			}
 		}
 	}
+	msg := fmt.Sprintf("CRD is not ready %s/%s.", crd.Namespace, crd.Name)
+	log.Printf(msg)
+	pushLastKnownError(msg)
 	return false
 }
 
@@ -443,6 +489,7 @@ func crdReady(crd *apiextv1.CustomResourceDefinition) bool {
 		switch cond.Type {
 		case apiextv1.Established:
 			if cond.Status == apiextv1.ConditionTrue {
+				popLastKnownError(crd.Name)
 				return true
 			}
 		case apiextv1.NamesAccepted:
@@ -451,9 +498,13 @@ func crdReady(crd *apiextv1.CustomResourceDefinition) bool {
 				// job of this function to fail because of that. Instead,
 				// we treat it as a success, since the process should be able to
 				// continue.
+				popLastKnownError(crd.Name)
 				return true
 			}
 		}
 	}
+	msg := fmt.Sprintf("CRD is not ready %s/%s.", crd.Namespace, crd.Name)
+	log.Printf(msg)
+	pushLastKnownError(msg)
 	return false
 }

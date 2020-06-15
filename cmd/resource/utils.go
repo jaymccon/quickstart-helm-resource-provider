@@ -661,3 +661,22 @@ func stringify(v interface{}) interface{} {
 		return nil
 	}
 }
+
+// pushLastKnownError to push to slice of string to send ot CFN
+func pushLastKnownError(msg string) {
+	if !stringInSlice(msg, LastKnownErrors) {
+		LastKnownErrors = append(LastKnownErrors, msg)
+	}
+}
+
+// popLastKnownError to pop from the LastKnownErrors
+func popLastKnownError(name string) {
+	for i, v := range LastKnownErrors {
+		re := regexp.MustCompile(name)
+		if re.MatchString(v) {
+			LastKnownErrors[i] = LastKnownErrors[len(LastKnownErrors)-1]
+			LastKnownErrors[len(LastKnownErrors)-1] = ""
+			LastKnownErrors = LastKnownErrors[:len(LastKnownErrors)-1]
+		}
+	}
+}
