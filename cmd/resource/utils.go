@@ -410,6 +410,7 @@ func checkTimeOut(startTime string, timeOut *int) bool {
 
 func getStage(context map[string]interface{}) Stage {
 	if context == nil {
+		os.Setenv("StartTime", time.Now().Format(time.RFC3339))
 		return InitStage
 	}
 	if context["Stage"] == nil {
