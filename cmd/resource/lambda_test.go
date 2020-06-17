@@ -87,28 +87,32 @@ func (m *mockLambdaClient) UpdateFunctionConfiguration(*lambda.UpdateFunctionCon
 }
 
 func (m *mockLambdaClient) Invoke(i *lambda.InvokeInput) (*lambda.InvokeOutput, error) {
-	if aws.StringValue(i.FunctionName) == "function2" {
+	switch aws.StringValue(i.FunctionName) {
+	case "function2":
 		t := map[string]string{"errorType": "SomeType", "errorMessage": "SomeMessage"}
 		p, _ := json.Marshal(t)
 		return &lambda.InvokeOutput{
 			FunctionError: aws.String("Function error"),
 			Payload:       p,
 		}, nil
+	case "functionNRetry":
+		return nil, awserr.New(lambda.ErrCodeInvalidRequestContentException, "ErrCodeInvalidRequestContentException", fmt.Errorf("ErrCodeInvalidRequestContentException"))
+	case "functionRetry":
+		return nil, awserr.New(lambda.ErrCodeTooManyRequestsException, "ErrCodeTooManyRequestsException", fmt.Errorf("ErrCodeTooManyRequestsException"))
+	default:
+		r, _ := json.Marshal(&LambdaResponse{
+			StatusData: &HelmStatusData{
+				Status:    release.StatusDeployed,
+				Namespace: "default",
+				Manifest:  TestManifest,
+			},
+			PendingResources: false,
+		})
+
+		return &lambda.InvokeOutput{
+			Payload: r,
+		}, nil
 	}
-	r, _ := json.Marshal(&LambdaResponse{
-		StatusData: &HelmStatusData{
-			Status:    release.StatusDeployed,
-			Namespace: "default",
-			Manifest:  TestManifest,
-		},
-		PendingResources: false,
-	})
-
-	//r, _ := json.Marshal(&LambdaResponse{})
-
-	return &lambda.InvokeOutput{
-		Payload: r,
-	}, nil
 }
 
 // TestCreateFunction to test createFunction
@@ -257,18 +261,24 @@ func TestChecklambdaState(t *testing.T) {
 // TestInvokeLambda to test invokeLambda
 func TestInvokeLambda(t *testing.T) {
 	mockSvc := &mockLambdaClient{}
-	expectedErr := "SomeMessage"
 	event := &Event{
 		Action: CheckReleaseAction,
 	}
-	functions := []string{"function1", "function2"}
+	tests := map[string]struct {
+		functionName string
+		expectedErr  string
+	}{
+		"Correct":                  {"function1", ""},
+		"FunctionError":            {"function2", "SomeMessage"},
+		"ServiceErrorWithOutRetry": {"functionNRetry", "InvalidRequestContentException"},
+		"ServiceErrorWithRetry":    {"functionRetry", "TooManyRequestsException"},
+	}
 
-	for _, name := range functions {
+	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := invokeLambda(mockSvc, aws.String(name), event)
-			t.Log(err)
+			_, err := invokeLambda(mockSvc, aws.String(d.functionName), event)
 			if err != nil {
-				assert.Contains(t, err.Error(), expectedErr)
+				assert.Contains(t, err.Error(), d.expectedErr)
 			}
 		})
 	}

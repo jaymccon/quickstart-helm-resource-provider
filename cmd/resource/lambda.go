@@ -211,10 +211,31 @@ func invokeLambda(svc LambdaAPI, functionName *string, event *Event) (*LambdaRes
 		FunctionName: functionName,
 		Payload:      eventJSON,
 	}
-
-	result, err := svc.Invoke(input)
-	if err != nil {
-		return nil, AWSError(err)
+	count := 0
+	var result *lambda.InvokeOutput
+	for count <= retryCount {
+		result, err = svc.Invoke(input)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				case lambda.ErrCodeTooManyRequestsException, lambda.ErrCodeServiceException,
+					lambda.ErrCodeEC2UnexpectedException, lambda.ErrCodeEC2ThrottledException,
+					lambda.ErrCodeResourceConflictException, lambda.ErrCodeResourceNotReadyException:
+					log.Printf("Got error from the lambda: %s. Retrying...", aerr.Code())
+					time.Sleep(5 * time.Second)
+					count++
+					if count >= retryCount {
+						return nil, AWSError(err)
+					}
+				default:
+					return nil, AWSError(err)
+				}
+			} else {
+				return nil, AWSError(err)
+			}
+		} else {
+			break
+		}
 	}
 	if result.FunctionError != nil {
 		log.Printf("Remote execution error: %v\n", *result.FunctionError)
