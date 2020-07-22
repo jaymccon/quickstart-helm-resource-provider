@@ -8,7 +8,7 @@ COPY . /build
 
 WORKDIR /build
 
-RUN go clean -modcache && go mod tidy
+RUN go mod download
 
 RUN make -f Makefile.package package
 
