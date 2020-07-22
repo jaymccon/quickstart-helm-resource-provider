@@ -3,7 +3,7 @@
 package:
 	go mod tidy
 	cfn generate
-	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -tags="logging callback scheduler" -o bin/handler cmd/main.go
+	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -tags="logging" -o bin/handler cmd/main.go
 	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -o bin/k8svpc vpc/main.go
 	find . -exec touch -t 202007010000.00 {} +
 	cd bin ; zip -FS -X k8svpc.zip k8svpc ; rm k8svpc ; zip -X ../handler.zip ./k8svpc.zip ./handler ; cd ..

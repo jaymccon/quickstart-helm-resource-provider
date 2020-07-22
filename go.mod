@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/avast/retry-go v2.6.0+incompatible // indirect
-	github.com/aws-cloudformation/cloudformation-cli-go-plugin v0.1.6
+	github.com/aws-cloudformation/cloudformation-cli-go-plugin v1.0.0
 	github.com/aws/aws-lambda-go v1.17.0
 	github.com/aws/aws-sdk-go v1.31.12
 	github.com/gofrs/flock v0.7.1

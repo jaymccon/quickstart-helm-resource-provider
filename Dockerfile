@@ -2,7 +2,7 @@ FROM golang:1.14-alpine
 
 RUN apk --no-cache add py3-pip make git zip
 
-RUN pip3 --no-cache-dir install https://github.com/aws-cloudformation/cloudformation-cli-go-plugin/archive/v0.1.5.tar.gz#egg=cloudformation-cli-go-plugin
+RUN pip3 install cloudformation-cli-go-plugin
 
 COPY . /build
 
