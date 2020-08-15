@@ -18,6 +18,7 @@ func init() {
 	os.Setenv(xdg.ConfigHomeEnvVar, HelmConfigHomeEnvVar)
 	os.Setenv(xdg.DataHomeEnvVar, HelmDataHomeEnvVar)
 	os.Setenv("StartTime", time.Now().Format(time.RFC3339))
+	os.Setenv("KUBECONFIG", KubeConfigLocalPath)
 }
 
 // Create handles the Create event from the CloudFormation service.

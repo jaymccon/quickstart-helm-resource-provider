@@ -26,7 +26,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes"
@@ -94,7 +93,8 @@ var NewClients = func(cluster *string, kubeconfig *string, namespace *string, se
 	if namespace == nil {
 		namespace = aws.String("default")
 	}
-	c.HelmClient, err = helmClientInvoke(namespace)
+	c.Settings = cli.New()
+	c.HelmClient, err = helmClientInvoke(namespace, c.Settings.RESTClientGetter())
 	if err != nil {
 		return nil, err
 	}
@@ -102,10 +102,9 @@ var NewClients = func(cluster *string, kubeconfig *string, namespace *string, se
 	if err != nil {
 		return nil, err
 	}
-	c.Settings = cli.New()
-	restClientGetter := kube.GetConfig(KubeConfigLocalPath, "", *namespace)
+
 	c.ResourceBuilder = func() *resource.Builder {
-		return resource.NewBuilder(restClientGetter)
+		return resource.NewBuilder(c.Settings.RESTClientGetter())
 	}
 	c.LambdaResource = newLambdaResource(c.AWSClients.STSClient(nil, nil), cluster, kubeconfig, vpcConfig)
 	return c, nil
