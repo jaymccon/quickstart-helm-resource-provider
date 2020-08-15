@@ -19,6 +19,7 @@ func init() {
 	os.Setenv(xdg.DataHomeEnvVar, HelmDataHomeEnvVar)
 	os.Setenv("StartTime", time.Now().Format(time.RFC3339))
 	os.Setenv("KUBECONFIG", KubeConfigLocalPath)
+	os.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "regional")
 }
 
 // Create handles the Create event from the CloudFormation service.

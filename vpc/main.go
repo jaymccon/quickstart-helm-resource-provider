@@ -25,6 +25,9 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 	}
 
 	client, err := resource.NewClients(nil, nil, data.Namespace, nil, nil, e.Kubeconfig, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	switch e.Action {
 	case resource.InstallReleaseAction:
