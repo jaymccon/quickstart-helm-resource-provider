@@ -30,6 +30,7 @@ require (
 )
 
 replace (
+    github.com/aws-cloudformation/cloudformation-cli-go-plugin => github.com/jaymccon/cloudformation-cli-go-plugin v1.0.2
 	k8s.io/api => k8s.io/api v0.18.4
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.18.4
 	k8s.io/apimachinery => k8s.io/apimachinery v0.18.4
