@@ -3,7 +3,7 @@ module github.com/aws-quickstart/quickstart-helm-resource-provider
 go 1.13
 
 require (
-	github.com/aws-cloudformation/cloudformation-cli-go-plugin v1.0.0
+	github.com/aws-cloudformation/cloudformation-cli-go-plugin v1.0.1-0.20200827221319-c1261e85f57d
 	github.com/aws/aws-lambda-go v1.17.0
 	github.com/aws/aws-sdk-go v1.31.12
 	github.com/gofrs/flock v0.7.1
@@ -30,7 +30,6 @@ require (
 )
 
 replace (
-    github.com/aws-cloudformation/cloudformation-cli-go-plugin => github.com/jaymccon/cloudformation-cli-go-plugin v1.0.2
 	k8s.io/api => k8s.io/api v0.18.4
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.18.4
 	k8s.io/apimachinery => k8s.io/apimachinery v0.18.4
