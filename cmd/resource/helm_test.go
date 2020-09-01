@@ -1,7 +1,6 @@
 package resource
 
 import (
-	"helm.sh/helm/v3/pkg/cli"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,8 +12,7 @@ import (
 )
 
 func TestHelmClientInvoke(t *testing.T) {
-	setting := cli.New()
-	_, err := helmClientInvoke(aws.String("default"), setting.RESTClientGetter())
+	_, err := helmClientInvoke(aws.String("default"))
 	assert.Nil(t, err)
 }
 
@@ -149,7 +147,7 @@ func TestHelmStatus(t *testing.T) {
 			},
 		},
 		"NonExt": {
-			name:        "nonext",
+			name:        "NonExt",
 			expectedErr: aws.String("not found"),
 		},
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
 	"sigs.k8s.io/yaml"
@@ -52,12 +52,12 @@ type HelmListData struct {
 }
 
 // HelmClientInvoke generates the namespaced helm client
-func helmClientInvoke(namespace *string, getter genericclioptions.RESTClientGetter) (*action.Configuration, error) {
+func helmClientInvoke(namespace *string) (*action.Configuration, error) {
 	if namespace == nil {
 		namespace = aws.String("default")
 	}
 	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(getter, *namespace, os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
+	if err := actionConfig.Init(kube.GetConfig(KubeConfigLocalPath, "", *namespace), *namespace, os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
 		fmt.Sprintf(format, v)
 	}); err != nil {
 		return nil, genericError("Helm client", err)
