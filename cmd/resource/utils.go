@@ -93,6 +93,7 @@ var NewClients = func(cluster *string, kubeconfig *string, namespace *string, se
 	if namespace == nil {
 		namespace = aws.String("default")
 	}
+	os.Setenv("HELM_NAMESPACE", aws.StringValue(namespace))
 	c.Settings = cli.New()
 	c.HelmClient, err = helmClientInvoke(namespace, c.Settings.RESTClientGetter())
 	if err != nil {
