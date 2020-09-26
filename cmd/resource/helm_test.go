@@ -106,7 +106,7 @@ func TestHelmInstall(t *testing.T) {
 	for name, d := range tests {
 		t.Run(name, func(t *testing.T) {
 			ch, _ := getChartDetails(d.m)
-			err := c.HelmInstall(d.config, d.vals, ch)
+			err := c.HelmInstall(d.config, d.vals, ch, "mock-id")
 			if err != nil {
 				assert.Contains(t, err.Error(), aws.StringValue(d.expectedErr))
 			}

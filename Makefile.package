@@ -1,8 +1,8 @@
 .PHONY: package
 
 package:
-	go mod tidy
-	cfn generate
+	#go mod tidy
+	#cfn generate
 	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -tags="logging" -o bin/handler cmd/main.go
 	env CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags="-s -w" -o bin/k8svpc vpc/main.go
 	find . -exec touch -t 202007010000.00 {} +

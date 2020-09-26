@@ -24,6 +24,7 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 		return nil, err
 	}
 
+	fmt.Println("starting invocation...")
 	client, err := resource.NewClients(nil, nil, data.Namespace, nil, nil, e.Kubeconfig, nil)
 	if err != nil {
 		return nil, err
@@ -32,7 +33,7 @@ func HandleRequest(_ context.Context, e resource.Event) (*resource.LambdaRespons
 	switch e.Action {
 	case resource.InstallReleaseAction:
 		fmt.Println("InstallReleaseAction")
-		return nil, client.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
+		return nil, client.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails, *e.Model.ID)
 	case resource.CheckReleaseAction:
 		fmt.Println("CheckReleaseAction")
 		res.StatusData, err = client.HelmStatus(aws.StringValue(data.Name))

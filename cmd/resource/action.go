@@ -286,7 +286,7 @@ func (c *Clients) helmInstallWrapper(e *Event, functionName *string, vpc bool) e
 		_, err := invokeLambda(c.AWSClients.LambdaClient(nil, nil), functionName, e)
 		return err
 	default:
-		return c.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails)
+		return c.HelmInstall(e.Inputs.Config, e.Inputs.ValueOpts, e.Inputs.ChartDetails, *e.Model.ID)
 	}
 }
 
